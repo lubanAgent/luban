@@ -43,6 +43,27 @@ const runStateGinKey = "__luban_runtime_state_v1"
 // the first flow node; later nodes receive the preceding node's business
 // output.
 func (rt *Runtime) Run(ctx *gin.Context, appKey string, input any) (result any, resultErr error) {
+	return rt.runFrom(ctx, appKey, "", input)
+}
+
+// RunFrom executes the Agent identified by appKey beginning at the registered
+// business-function node named startFunc. The selected node and every
+// following node execute in their configured order. This is useful when one
+// Agent flow has multiple external entry points, such as a user conversation
+// that stops while awaiting confirmation and a later confirmed-generation
+// request that starts at a downstream business node.
+//
+// startFunc must identify exactly one function node in the Agent flow. The
+// caller supplies that node's input; RunFrom does not restore or retain any
+// state from an earlier Run.
+func (rt *Runtime) RunFrom(ctx *gin.Context, appKey, startFunc string, input any) (result any, resultErr error) {
+	if startFunc == "" {
+		return nil, fmt.Errorf("luban: start function must not be empty")
+	}
+	return rt.runFrom(ctx, appKey, startFunc, input)
+}
+
+func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, input any) (result any, resultErr error) {
 	activeNode := "Run setup"
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -84,13 +105,31 @@ func (rt *Runtime) Run(ctx *gin.Context, appKey string, input any) (result any, 
 	if err := rt.validateFlowSignatures(snapshot.config.Flow); err != nil {
 		return nil, fmt.Errorf("luban: appKey %q flow: %w", appKey, err)
 	}
+	startIndex := 0
+	if startFunc != "" {
+		matches := 0
+		for index, node := range snapshot.config.Flow {
+			if node.Func != startFunc {
+				continue
+			}
+			startIndex = index
+			matches++
+		}
+		switch {
+		case matches == 0:
+			return nil, fmt.Errorf("luban: appKey %q start function %q was not found in flow", appKey, startFunc)
+		case matches > 1:
+			return nil, fmt.Errorf("luban: appKey %q start function %q appears %d times in flow", appKey, startFunc, matches)
+		}
+	}
 
 	state := &runState{}
 	ctx.Set(runStateGinKey, state)
 	defer clearGinKey(ctx, runStateGinKey)
 
-	steps := make([]internaleino.Step, 0, len(snapshot.config.Flow))
-	for index, node := range snapshot.config.Flow {
+	steps := make([]internaleino.Step, 0, len(snapshot.config.Flow)-startIndex)
+	for index := startIndex; index < len(snapshot.config.Flow); index++ {
+		node := snapshot.config.Flow[index]
 		index, node := index, node
 		steps = append(steps, func(current context.Context, incoming nodeValue) (nodeValue, error) {
 			activeNode = fmt.Sprintf("flow[%d]", index)

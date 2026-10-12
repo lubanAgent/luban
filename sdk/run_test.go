@@ -3,8 +3,10 @@ package luban
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +47,95 @@ func TestRunPassesValuesBetweenBusinessNodes(t *testing.T) {
 	}
 	if result != "length=5" {
 		t.Fatalf("Run result = %#v", result)
+	}
+}
+
+func TestRunFromStartsAtNamedFunctionAndExecutesRemainingFlow(t *testing.T) {
+	var calls []string
+	rt := newBusinessRuntime(t, []NodeConfig{
+		{Func: "PrepareConversation"},
+		{Func: "ReturnConversation"},
+		{Func: "PrepareS1"},
+		{Func: "RunS1"},
+		{Func: "Finish"},
+	}, map[string]any{
+		"PrepareConversation": func(*gin.Context, string) string {
+			calls = append(calls, "conversation")
+			return "conversation"
+		},
+		"ReturnConversation": func(*gin.Context, string) string {
+			calls = append(calls, "return-conversation")
+			return "conversation-result"
+		},
+		"PrepareS1": func(_ *gin.Context, input string) int {
+			calls = append(calls, "prepare-s1")
+			if input != "generation-input" {
+				t.Fatalf("RunFrom input = %q, want generation-input", input)
+			}
+			return 1
+		},
+		"RunS1": func(_ *gin.Context, input int) int {
+			calls = append(calls, "s1")
+			return input + 1
+		},
+		"Finish": func(_ *gin.Context, input int) string {
+			calls = append(calls, "finish")
+			return fmt.Sprintf("result-%d", input)
+		},
+	})
+
+	result, err := rt.RunFrom(&gin.Context{}, "test", "PrepareS1", "generation-input")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "result-2" {
+		t.Fatalf("RunFrom result = %#v, want result-2", result)
+	}
+	wantCalls := []string{"prepare-s1", "s1", "finish"}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %v, want %v", calls, wantCalls)
+	}
+}
+
+func TestRunFromRequiresUniqueRegisteredFlowFunction(t *testing.T) {
+	tests := []struct {
+		name string
+		flow []NodeConfig
+		from string
+		want string
+	}{
+		{
+			name: "unknown function",
+			flow: []NodeConfig{{Func: "Known"}},
+			from: "Missing",
+			want: `start function "Missing" was not found`,
+		},
+		{
+			name: "duplicate function",
+			flow: []NodeConfig{{Func: "Known"}, {Func: "Known"}},
+			from: "Known",
+			want: `start function "Known" appears 2 times`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rt := newBusinessRuntime(t, test.flow, map[string]any{
+				"Known": func(*gin.Context) string { return "done" },
+			})
+			_, err := rt.RunFrom(&gin.Context{}, "test", test.from, nil)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("RunFrom error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestRunFromRejectsEmptyStartFunction(t *testing.T) {
+	rt := newBusinessRuntime(t, []NodeConfig{{Func: "Finish"}}, map[string]any{
+		"Finish": func(*gin.Context) string { return "done" },
+	})
+	if _, err := rt.RunFrom(&gin.Context{}, "test", "", nil); err == nil {
+		t.Fatal("expected an empty start function to fail")
 	}
 }
 

@@ -7,8 +7,10 @@ functions, Tools, and Skills; the SDK owns orchestration and Eino integration.
 The public SDK module is `github.com/lubanAgent/luban/sdk`, with package name
 `luban`. The Runtime, registration, sequential Chain, business functions, Eino
 ChatModelAgent, Tools, Skills, structured OutputTool, Batch, and HTTP/MQ/Cron
-adapters are implemented. The admissions SchoolPicker stage now runs through
-Luban, with OpenProxy HTTP kept in the admissions `ModelInvoker`.
+adapters are implemented. Admissions uses one `admissionsAgent` configuration
+for its full flow from conversation through S1/S2/S3 and SchoolPicker. Each
+Agent node has its own model and system prompt; OpenProxy HTTP stays in the
+admissions `ModelInvoker`.
 
 The repository root provides one SDK validation command:
 
@@ -22,9 +24,12 @@ library and open-source modules; it does not import company packages.
 
 The SDK uses the V3 contract: business modules provide a `ModelInvoker` that
 performs model HTTP requests, register functions/Tools/Skills, then call
-`Runtime.Run(ctx, appKey, input)`. The Runtime adapts those calls to Eino while
-keeping business gateway and side-effect code in the host module. For the
-current API and scope, see the V3 design documents.
+`Runtime.Run(ctx, appKey, input)`. `Runtime.RunFrom(ctx, appKey, startFunc,
+input)` can execute the configured flow from one unique business-function node
+when a later request begins at a downstream stage; it does not restore state
+from an earlier Run. The Runtime adapts those calls to Eino while keeping
+business gateway and side-effect code in the host module. For the current API
+and scope, see the V3 design documents.
 
 ## Offline example
 
@@ -45,8 +50,8 @@ The module path is `github.com/lubanAgent/luban/sdk`. A published install
 version will be documented after the first SDK release. Admissions currently
 uses a local `replace` to the sibling Luban checkout until the first release.
 
-The admissions adapter passed fake-client tests and one live SchoolPicker
-request. The live test is opt-in:
+The admissions adapter has offline fake-client tests. The live smoke test is
+opt-in and was not run as part of local implementation checks:
 
 ```sh
 ADMISSIONS_LIVE_LUBAN_TESTS=1 go test ./service/ai/lubanruntime \

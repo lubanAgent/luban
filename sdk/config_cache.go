@@ -73,10 +73,11 @@ func (rt *Runtime) validateAndSnapshot(appKey string, agent AgentConfig) (agentS
 
 func (rt *Runtime) internalConfigRegistry() internalconfig.Registry {
 	registry := internalconfig.Registry{
-		Functions: make(map[string]struct{}, len(rt.funcs)),
-		Models:    make(map[string]struct{}, len(rt.models)),
-		Tools:     make(map[string]struct{}, len(rt.tools)),
-		Skills:    make(map[string]internalconfig.Skill, len(rt.skills)),
+		Functions:     make(map[string]struct{}, len(rt.funcs)),
+		Models:        make(map[string]struct{}, len(rt.models)),
+		Tools:         make(map[string]struct{}, len(rt.tools)),
+		Skills:        make(map[string]internalconfig.Skill, len(rt.skills)),
+		SkillBackends: make(map[string]struct{}, len(rt.skillBackends)),
 	}
 	for name := range rt.funcs {
 		registry.Functions[name] = struct{}{}
@@ -93,6 +94,9 @@ func (rt *Runtime) internalConfigRegistry() internalconfig.Registry {
 			Description: skill.Description,
 			Content:     skill.Content,
 		}
+	}
+	for name := range rt.skillBackends {
+		registry.SkillBackends[name] = struct{}{}
 	}
 	return registry
 }

@@ -10,15 +10,18 @@ import (
 // Options configures a Runtime. Config and the Models map are copied by New;
 // ModelInvoker implementations themselves remain owned by the caller.
 type Options struct {
-	Config Config
-	Models map[string]ModelInvoker
+	Config        Config
+	Models        map[string]ModelInvoker
+	SkillBackends map[string]SkillBackend
+	TraceWriter   TraceWriter
 }
 
 // Runtime holds immutable business registrations and configuration snapshots.
 // A Runtime is safe for concurrent use after Register succeeds.
 type Runtime struct {
-	config Config
-	models map[string]ModelInvoker
+	config      Config
+	models      map[string]ModelInvoker
+	traceWriter TraceWriter
 
 	registerMu      sync.Mutex
 	registerAttempt bool
@@ -26,6 +29,7 @@ type Runtime struct {
 	funcs           map[string]registeredFunction
 	tools           map[string]registeredTool
 	skills          map[string]Skill
+	skillBackends   map[string]SkillBackend
 
 	configCache *configCache
 }
@@ -50,13 +54,26 @@ func New(options Options) (*Runtime, error) {
 		models[key] = model
 	}
 
+	skillBackends := make(map[string]SkillBackend, len(options.SkillBackends))
+	for key, backend := range options.SkillBackends {
+		if key == "" {
+			return nil, fmt.Errorf("luban: SkillBackend name must not be empty")
+		}
+		if isNilInterface(backend) {
+			return nil, fmt.Errorf("luban: SkillBackend %q is nil", key)
+		}
+		skillBackends[key] = backend
+	}
+
 	return &Runtime{
-		config:      cloneConfig(options.Config),
-		models:      models,
-		funcs:       make(map[string]registeredFunction),
-		tools:       make(map[string]registeredTool),
-		skills:      make(map[string]Skill),
-		configCache: newConfigCache(),
+		config:        cloneConfig(options.Config),
+		models:        models,
+		traceWriter:   options.TraceWriter,
+		funcs:         make(map[string]registeredFunction),
+		tools:         make(map[string]registeredTool),
+		skills:        make(map[string]Skill),
+		skillBackends: skillBackends,
+		configCache:   newConfigCache(),
 	}, nil
 }
 
@@ -125,6 +142,9 @@ func (rt *Runtime) Register(funcs map[string]any, tools []Tool, skills []Skill) 
 		}
 		if _, exists := registeredSkills[skill.Name]; exists {
 			return fmt.Errorf("luban: duplicate Skill name %q", skill.Name)
+		}
+		if _, exists := rt.skillBackends[skill.Name]; exists {
+			return fmt.Errorf("luban: Skill %q conflicts with a SkillBackend name", skill.Name)
 		}
 		registeredSkills[skill.Name] = skill
 	}

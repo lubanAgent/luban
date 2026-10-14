@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Luban Trace · 执行详情</title>
+  <link rel="stylesheet" href="./viewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brandmark" aria-hidden="true">L</span><strong>Luban</strong><small>执行日志</small></div>
+    <div class="top-actions">
+      <span class="private-label"><span class="privacy-dot"></span>仅在本机解析 · 不上传数据</span>
+      <button class="top-button" id="toggleImport" type="button" aria-expanded="true" aria-controls="importPanel">导入日志</button>
+    </div>
+  </header>
+  <section class="import-panel" id="importPanel" aria-label="导入 Trace 日志">
+    <div class="import-heading"><strong>粘贴日志，查看一次 Agent 的执行过程</strong><span>支持含 traceEvent 的业务 JSON 日志、独立事件行及 JSON 数组</span></div>
+    <textarea id="logInput" spellcheck="false" aria-label="Trace 日志内容" placeholder='{"msg":"luban_trace","traceEvent":{"version":1,"runId":"run_...", ...}}'></textarea>
+    <details class="config-import">
+      <summary>旧日志没有业务名称？可附加 Agent 配置 JSON</summary>
+      <p>仅用 flow 下标和已注册节点名匹配 description。新日志会直接携带描述；配置不会上传。</p>
+      <textarea id="configInput" spellcheck="false" aria-label="Agent 配置 JSON" placeholder='{"agents":{"trustee":{"flow":[{"func":"prepareTrustee","description":"准备会话数据"}]}}}'></textarea>
+      <label class="file-label" for="configFile">选择配置文件</label><input id="configFile" type="file" accept=".json,application/json" hidden>
+    </details>
+    <div class="import-actions">
+      <button class="button-primary" id="parseButton" type="button">解析 Trace</button>
+      <label class="file-label" for="logFile">选择本地文件</label><input id="logFile" type="file" accept=".log,.json,.jsonl,.ndjson,.txt,application/json,text/plain" hidden>
+      <button class="button-quiet" id="demoButton" type="button">查看演示数据</button>
+      <button class="button-quiet" id="clearButton" type="button">清空</button>
+      <span class="import-message" id="importMessage" role="status">日志只留在当前页面内存中。</span>
+    </div>
+  </section>
+  <main class="shell">
+    <section class="welcome" id="welcome">
+      <div class="welcome-icon" aria-hidden="true">⌁</div>
+      <h1>Trace 日志查看</h1>
+      <p>粘贴 Luban Trace 日志，查看 Agent、模型调用和 Tool 的执行层级。没有日志时可用演示数据预览布局。</p>
+      <button class="button-primary" id="welcomeDemo" type="button">预览演示 Trace</button>
+    </section>
+    <div id="workspace" hidden>
+      <div class="overview-head">
+        <div><p class="eyebrow">Luban Trace</p><h1 class="page-title">运行概览</h1><p class="page-subtitle" id="runSubtitle"></p></div>
+        <span class="run-tag" id="runTag"></span>
+      </div>
+      <div class="metrics" id="metrics"></div>
+      <div class="notice" id="notice"></div>
+      <div class="board">
+        <aside class="panel">
+          <div class="panel-title"><strong>运行记录</strong><small id="runCount"></small></div>
+          <nav class="runs-list" id="runsList" aria-label="选择 Run"></nav>
+        </aside>
+        <section class="panel">
+          <div class="trace-head">
+            <div class="trace-head-top"><strong>调用树 <span class="separator">/</span> 时间瀑布</strong><small id="nodeCount"></small></div>
+            <div class="trace-tools">
+              <input class="search" id="searchInput" type="search" aria-label="搜索节点" placeholder="搜索函数、Agent、模型或工具">
+              <button class="text-button" id="expandButton" type="button">全部展开</button>
+              <button class="text-button" id="collapseButton" type="button">全部收起</button>
+            </div>
+          </div>
+          <div class="column-head"><span>执行节点</span><span class="align-right">耗时</span><span class="ticks" id="ticks"></span></div>
+          <div class="tree" id="tree" role="tree" aria-label="Trace 执行树"></div>
+        </section>
+        <aside class="panel detail-panel">
+          <div id="detail"><p class="detail-placeholder">选择左侧节点，查看执行详情与完整输入输出。</p></div>
+        </aside>
+      </div>
+    </div>
+  </main>
+  <script src="./trace-data.js"></script>
+  <script src="./viewer.js"></script>
+</body>
+</html>

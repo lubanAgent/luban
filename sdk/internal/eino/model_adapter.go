@@ -351,8 +351,14 @@ func responseToEinoMessage(response ModelResponse) (*schema.Message, error) {
 			},
 		})
 	}
-	if response.FinishReason != "" {
+	if response.FinishReason != "" || response.Usage != nil {
 		message.ResponseMeta = &schema.ResponseMeta{FinishReason: response.FinishReason}
+		if response.Usage != nil {
+			message.ResponseMeta.Usage = &schema.TokenUsage{
+				PromptTokens: response.Usage.InputTokens, CompletionTokens: response.Usage.OutputTokens,
+				TotalTokens: response.Usage.InputTokens + response.Usage.OutputTokens,
+			}
+		}
 	}
 	return message, nil
 }

@@ -29,6 +29,62 @@ func TestTraceBatchResultPreservesItemError(t *testing.T) {
 	}
 }
 
+func TestTraceModelUsageKeepsRealCountsAndOmission(t *testing.T) {
+	withUsage := modelResponseToInternal(ModelResponse{
+		Usage: &ModelUsage{InputTokens: 13, OutputTokens: 7},
+	})
+	if withUsage.Usage == nil || withUsage.Usage.InputTokens != 13 ||
+		withUsage.Usage.OutputTokens != 7 {
+		t.Fatalf("usage lost in SDK adapter: %+v", withUsage)
+	}
+	withoutUsage := internaltrace.Snapshot(modelResponseToInternal(ModelResponse{}))
+	if strings.Contains(string(withoutUsage), `"usage"`) {
+		t.Fatalf("missing usage should not look like zero tokens: %s", withoutUsage)
+	}
+}
+
+func TestTraceRunCapturesModelUsage(t *testing.T) {
+	writer := &collectingTraceWriter{}
+	rt, err := New(Options{
+		Config: Config{Agents: map[string]AgentConfig{"task": {Flow: []NodeConfig{{
+			ModelName: "model", SystemPrompt: "Answer briefly.",
+		}}}}},
+		Models: map[string]ModelInvoker{"model": &scriptedInvoker{responses: []ModelResponse{{
+			Content: []ModelPart{{Type: PartText, Text: "ok"}},
+			Usage:   &ModelUsage{InputTokens: 23, OutputTokens: 4},
+		}}}},
+		TraceWriter: writer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Register(nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = rt.Run(newGinContextForAgentTest(t), "task", Request{
+		Messages: []Message{{Role: RoleUser, Content: []Part{{Type: PartText, Text: "Hello."}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range writer.snapshot() {
+		if event.Type != "model" {
+			continue
+		}
+		var output struct {
+			Usage *ModelUsage `json:"usage"`
+		}
+		if err := json.Unmarshal(event.Output, &output); err != nil {
+			t.Fatal(err)
+		}
+		if output.Usage == nil || output.Usage.InputTokens != 23 || output.Usage.OutputTokens != 4 {
+			t.Fatalf("model trace lost tokens: %s", event.Output)
+		}
+		return
+	}
+	t.Fatal("model trace event missing")
+}
+
 func TestTraceFunctionPanicClosesNodeWithError(t *testing.T) {
 	writer := &collectingTraceWriter{}
 	rt, err := New(Options{

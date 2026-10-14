@@ -6,9 +6,28 @@ import (
 	"fmt"
 )
 
-// Config contains the named Agent configurations available to a Runtime.
+// Config 按 appKey 保存 Agent 配置。JSON/YAML 最外层直接是 appKey，
+// 不包含 agents 包装层；Go 中仍通过 Agents 字段访问注册的配置。
 type Config struct {
-	Agents map[string]AgentConfig `json:"agents" yaml:"agents"`
+	Agents map[string]AgentConfig `json:"-" yaml:",inline"`
+}
+
+// MarshalJSON 将各 Agent 直接编码到配置根对象。
+func (c Config) MarshalJSON() ([]byte, error) {
+	if c.Agents == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(c.Agents)
+}
+
+// UnmarshalJSON 读取以 appKey 为根 key 的配置。
+func (c *Config) UnmarshalJSON(data []byte) error {
+	var agents map[string]AgentConfig
+	if err := json.Unmarshal(data, &agents); err != nil {
+		return err
+	}
+	c.Agents = agents
+	return nil
 }
 
 // AgentConfig describes an Agent and its ordered flow.

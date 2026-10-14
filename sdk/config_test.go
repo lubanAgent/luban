@@ -9,14 +9,12 @@ import (
 )
 
 const sampleConfigJSON = `{
-  "agents": {
-    "lessonReview": {
-      "flow": [{
-        "modelName": "review-model",
-        "systemPrompt": "Review the lesson.",
-        "maxLoopCount": 3
-      }]
-    }
+  "lessonReview": {
+    "flow": [{
+      "modelName": "review-model",
+      "systemPrompt": "Review the lesson.",
+      "maxLoopCount": 3
+    }]
   }
 }`
 
@@ -39,6 +37,37 @@ func TestConfigJSONAndProjectYAMLDecodeCamelCaseKeys(t *testing.T) {
 			}
 			if node.MaxLoopCount == nil || *node.MaxLoopCount != 3 {
 				t.Fatalf("maxLoopCount was not decoded: %+v", node.MaxLoopCount)
+			}
+		})
+	}
+}
+
+func TestConfigRootKeysRoundTrip(t *testing.T) {
+	for _, decode := range []struct {
+		name string
+		fn   func([]byte, any) error
+	}{
+		{name: "json", fn: json.Unmarshal},
+		{name: "project-yaml-loader", fn: yaml.Unmarshal},
+	} {
+		t.Run(decode.name, func(t *testing.T) {
+			var config Config
+			if err := decode.fn([]byte(sampleConfigJSON), &config); err != nil {
+				t.Fatal(err)
+			}
+			if len(config.Agents) != 1 || len(config.Agents["lessonReview"].Flow) != 1 {
+				t.Fatalf("root appKey was not decoded: %+v", config.Agents)
+			}
+			raw, err := json.Marshal(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var root map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &root); err != nil {
+				t.Fatal(err)
+			}
+			if len(root) != 1 || len(root["lessonReview"]) == 0 {
+				t.Fatalf("root config was wrapped unexpectedly: %s", raw)
 			}
 		})
 	}

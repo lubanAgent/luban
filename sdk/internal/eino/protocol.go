@@ -73,6 +73,13 @@ type ModelResponse struct {
 	Content      []Part
 	ToolCalls    []ToolCall
 	FinishReason string
+	Usage        *ModelUsage `json:"usage,omitempty"`
+}
+
+// ModelUsage 只保存业务适配器实际返回的用量。
+type ModelUsage struct {
+	InputTokens  int `json:"inputTokens"`
+	OutputTokens int `json:"outputTokens"`
 }
 
 // ModelInvoker performs one model request. The host package adapts its public

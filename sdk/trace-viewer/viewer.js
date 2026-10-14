@@ -2,7 +2,8 @@
   "use strict";
   const data = globalThis.LubanTraceData;
   const byId = id => document.getElementById(id);
-  const state = { groups: new Map(), selectedRun: "", selected: null, collapsed: new Set(), demo: false, skipped: 0 };
+  const state = { groups: new Map(), selectedRun: "", selected: null, collapsed: new Set(),
+    demo: false, skipped: 0, mode: "tree", detailTab: "overview" };
   const typeNames = {
     run: "Run", function: "业务函数", agent: "Agent", model: "模型调用",
     tool: "Tool", skill: "Skill", batchItem: "Batch 项",
@@ -110,6 +111,11 @@
     card.append(element("small", label), element("strong", value, className));
     return card;
   }
+  function count(value) { return value.toLocaleString("zh-CN"); }
+  function tokenText(usage) {
+    if (!usage.known) return "未提供";
+    return `${count(usage.input + usage.output)}${usage.known < usage.models ? "（部分）" : ""}`;
+  }
   function renderOverview(view) {
     const root = view.run?.event;
     byId("runSubtitle").textContent = root
@@ -123,14 +129,20 @@
       metric("运行状态", root ? statusNames[root.status] : "未知", `status ${root?.status || ""}`),
       metric("总耗时", root ? duration(root.durationNs / 1e6) : "未知"),
       metric("模型调用", view.entries.filter(entry => entry.event.type === "model").length),
-      metric("Tool / Skill", view.entries.filter(entry => ["tool", "skill"].includes(entry.event.type)).length),
-      metric("已收到事件", view.entries.length),
+      metric("Token", tokenText(data.tokenUsage(view.entries))),
+      metric("已收到节点", view.entries.length),
     );
     const notice = byId("notice");
     notice.replaceChildren();
     if (view.warnings.length) {
       notice.className = "notice";
-      notice.append(element("strong", "日志尚不完整；虚线层级仅标示缺失的 parentSpanId，不代表节点已经结束："));
+      if (!root) {
+        const last = view.entries[view.entries.length - 1]?.event;
+        notice.append(element("strong",
+          `本次导入只有 ${view.entries.length} 条已完成节点的事件，未收到 Run 结束事件。${last ? `最后一条是“${data.displayName(last)}”。` : ""}后续 Tool 或收尾节点尚无日志，无法展示完整流程。请用同一 runId 导入执行结束后的完整日志。`));
+      } else {
+        notice.append(element("strong", "部分父节点日志缺失；虚线层级仅标示缺失的 parentSpanId，不代表节点已经结束："));
+      }
       const list = element("ul");
       for (const warning of view.warnings) list.append(element("li", warning));
       notice.append(list);
@@ -143,7 +155,7 @@
         `${view.legacyTransfers} 处旧日志把子 Agent 记在已结束的选择 Agent 下；依据 transferTo 和时间顺序按同级展示。详情仍保留原始 parentSpanId。`,
         "legacy-note"));
     }
-    byId("nodeCount").textContent = `展示 ${view.displayEntries.length} 行 · 原始 ${view.entries.length} 条`;
+    byId("nodeCount").textContent = `调用链 · ${view.displayEntries.length} 个节点`;
     const ticks = byId("ticks");
     ticks.replaceChildren(element("span", "0"), element("span", duration(view.duration / 2)),
       element("span", duration(view.duration)));
@@ -151,6 +163,9 @@
   function renderTree(view) {
     const target = byId("tree");
     target.replaceChildren();
+    target.classList.toggle("timeline-mode", state.mode === "timeline");
+    byId("treeMode").classList.toggle("active", state.mode === "tree");
+    byId("timelineMode").classList.toggle("active", state.mode === "timeline");
     const query = byId("searchInput").value.trim().toLowerCase();
     const matches = entry => `${entry.event.name} ${entry.event.description || ""} ${data.displayName(entry.event)} ${entry.event.type} ${typeNames[entry.event.type] || ""} ${entry.event.agentName || ""}`
       .toLowerCase().includes(query);
@@ -188,10 +203,17 @@
         renderTree(view);
       });
       const label = element("span", undefined, "node-label");
+      const sub = entry.missing ? "尚未收到节点结束事件" :
+        `${typeNames[event.type] || event.type} · ${statusNames[event.status] || event.status || "未知"}`;
       label.append(element("span", data.displayName(event) || "(未命名)", "node-name"),
-        element("span", entry.missing ? "仅作层级提示，未收到该节点事件" :
-          `${typeNames[event.type] || event.type} · ${event.name}${entry.transferFromSpanId ? ` · 从 ${entry.transferFromSpanId} 移交` : ""}${entry.issue ? ` · ${entry.issue}` : ""}`, "node-sub"));
+        element("span", sub, "node-sub"));
       info.append(expand, element("span", glyphs[event.type] || "·", `glyph ${event.type}`), label);
+      const stats = element("span", undefined, "node-stats");
+      stats.append(element("span", entry.missing ? "—" : duration(event.durationNs / 1e6), "node-duration"));
+      if (!entry.missing && ["run", "agent", "model"].includes(event.type)) {
+        const usage = data.tokenUsage(view.entries, entry);
+        if (usage.known) stats.append(element("span", `${tokenText(usage)} tk`, "node-tokens"));
+      }
       const lane = element("div", undefined, "lane");
       const bar = element("span", undefined, `bar ${event.type} ${event.status}`);
       if (!entry.missing) {
@@ -201,7 +223,7 @@
         bar.style.width = `${widthPercent}%`;
         lane.append(bar);
       }
-      row.append(info, element("span", entry.missing ? "—" : duration(event.durationNs / 1e6), "node-duration"), lane);
+      row.append(info, stats, lane);
       row.title = entry.missing ? `日志未包含 ${entry.missingId}` :
         `${event.description ? `${event.description}\n` : ""}${event.name} · ${event.spanId} · ${time(event.startedAt)} · ${statusNames[event.status]}`;
       row.addEventListener("click", () => {
@@ -211,7 +233,7 @@
           renderTree(view);
           return;
         }
-        state.selected = entry; renderTree(view); renderDetail(entry);
+        state.selected = entry; state.detailTab = "overview"; renderTree(view); renderDetail(entry);
       });
       row.addEventListener("keydown", e => {
         if (e.target !== row) return;
@@ -241,52 +263,56 @@
       return;
     }
     const event = entry.event;
+    const view = current();
     const head = element("div", undefined, "detail-head");
-    head.append(element("small", `${typeNames[event.type] || event.type} · ${event.spanId}`),
+    head.append(element("small", typeNames[event.type] || event.type),
       element("h2", data.displayName(event) || "(未命名)"));
     if (event.description) head.append(element("p", event.description, "detail-description"));
     const pills = element("div", undefined, "pills");
-    pills.append(element("span", statusNames[event.status], `pill ${event.status}`));
-    const flowIndex = event.flowIndex ?? entry.flowWrapper?.event.flowIndex;
-    if (flowIndex !== undefined && flowIndex !== null)
-      pills.append(element("span", `flow[${flowIndex}]`, "pill"));
-    if (entry.transferFromSpanId)
-      pills.append(element("span", `由 ${entry.transferFromSpanId} 移交`, "pill"));
-    if (entry.issue) pills.append(element("span", entry.issue, "pill stopped"));
+    pills.append(element("span", `状态 ${statusNames[event.status] || "未知"}`, `pill ${event.status}`),
+      element("span", `耗时 ${duration(event.durationNs / 1e6)}`, "pill"));
+    if (event.type === "model") pills.append(element("span", `模型 ${event.name}`, "pill"));
+    const usage = data.tokenUsage(view.entries, entry);
+    if (event.type === "model" || event.type === "agent" || event.type === "run") {
+      pills.append(element("span", `Token ${tokenText(usage)}`, "pill"));
+    }
     head.append(pills);
+    const tabs = element("nav", undefined, "detail-tabs");
+    tabs.setAttribute("aria-label", "节点详情");
+    for (const [key, title] of [["overview", "概览"], ["input", "输入"], ["output", "输出"]]) {
+      const button = element("button", title, state.detailTab === key ? "active" : "");
+      button.type = "button";
+      button.addEventListener("click", () => { state.detailTab = key; renderDetail(entry); });
+      tabs.append(button);
+    }
     const scroll = element("div", undefined, "detail-scroll");
-    const metadata = element("section", undefined, "detail-section");
-    metadata.append(element("h3", "执行信息"));
-    const grid = element("dl", undefined, "meta-grid");
-    const fields = [
-      ["开始时间", time(event.startedAt)], ["执行耗时", duration(event.durationNs / 1e6)],
-      ["原始名称", event.name], ["Span ID", event.spanId], ["父节点", event.parentSpanId || "根节点"],
-      ["Agent", event.agentName || "未提供"], ["Token", "未提供"],
-    ];
-    if (entry.displayParentSpanId) fields.push(["展示父级", entry.displayParentSpanId]);
-    if (entry.transferFromSpanId) fields.push(["移交来源", entry.transferFromSpanId]);
-    if (entry.flowWrapper) fields.push(["外层步骤", `${entry.flowWrapper.event.spanId} · ${entry.flowWrapper.event.name}`]);
-    for (const [label, value] of fields) grid.append(element("dt", label), element("dd", value));
-    metadata.append(grid);
-    scroll.append(metadata);
-    if (event.error) scroll.append(section("执行错误", event.error, "error-box"));
-    if (entry.flowWrapper) {
-      const wrapper = entry.flowWrapper.event;
-      const details = element("details", undefined, "wrapper-details");
-      details.append(element("summary", `外层 flow 步骤 ${wrapper.spanId} · ${duration(wrapper.durationNs / 1e6)}`),
-        section("步骤输入", data.formatValue(wrapper.input)),
-        section("步骤输出", data.formatValue(wrapper.output)));
+    if (state.detailTab === "overview") {
+      if (event.error) scroll.append(section("执行错误", event.error, "error-box"));
+      if (event.type === "model") {
+        const tokenLine = element("div", undefined, "token-summary");
+        tokenLine.append(metric("输入 Token", usage.known ? count(usage.input) : "未提供"),
+          metric("输出 Token", usage.known ? count(usage.output) : "未提供"));
+        scroll.append(tokenLine);
+      }
+      const summary = element("p", event.description || `${typeNames[event.type] || event.type}：${event.name}`, "detail-summary");
+      scroll.append(summary);
+      const preview = event.type === "model" && event.output?.ToolCalls?.length
+        ? `调用工具：${event.output.ToolCalls.map(call => call.Name).join("、")}`
+        : event.type === "skill" ? `加载：${data.displayName(event)}` : null;
+      if (preview) scroll.append(element("p", preview, "detail-preview"));
+      if (entry.transferFromSpanId) scroll.append(element("p", `由 ${entry.transferFromSpanId} 移交`, "detail-preview"));
+      const details = element("details", undefined, "raw-details");
+      details.append(element("summary", "技术信息"),
+        element("p", `原始名称：${event.name} · Span：${event.spanId} · 父级：${event.parentSpanId || "根节点"}`));
+      if (entry.flowWrapper) details.append(element("p", `外层步骤：${entry.flowWrapper.event.spanId}`));
       scroll.append(details);
-    }
-    const columns = element("div", undefined, "detail-columns");
-    for (const [label, value] of [["输入 Input", event.input], ["输出 Output", event.output]]) {
-      const block = section(label, data.formatValue(value));
+    } else {
+      const value = state.detailTab === "input" ? event.input : event.output;
+      scroll.append(section(state.detailTab === "input" ? "完整输入" : "完整输出", data.formatValue(value)));
       if (value && typeof value === "object" && value._traceUnavailable)
-        block.append(element("p", "该值无法序列化；上方保留 SDK 提供的类型与原因。", "data-note"));
-      columns.append(block);
+        scroll.append(element("p", "该值无法序列化；上方保留 SDK 提供的类型与原因。", "data-note"));
     }
-    scroll.append(columns);
-    target.append(head, scroll);
+    target.append(head, tabs, scroll);
   }
   function render() {
     const view = current();
@@ -307,6 +333,8 @@
   byId("welcomeDemo").addEventListener("click", demo);
   byId("clearButton").addEventListener("click", clear);
   byId("searchInput").addEventListener("input", () => { if (current()) renderTree(current()); });
+  byId("treeMode").addEventListener("click", () => { state.mode = "tree"; if (current()) renderTree(current()); });
+  byId("timelineMode").addEventListener("click", () => { state.mode = "timeline"; if (current()) renderTree(current()); });
   byId("expandButton").addEventListener("click", () => { state.collapsed.clear(); if (current()) renderTree(current()); });
   byId("collapseButton").addEventListener("click", () => {
     const view = current();

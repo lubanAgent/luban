@@ -41,26 +41,31 @@
     </section>
     <div id="workspace" hidden>
       <div class="overview-head">
-        <div><p class="eyebrow">Luban Trace</p><h1 class="page-title">运行概览</h1><p class="page-subtitle" id="runSubtitle"></p></div>
+        <div><p class="eyebrow">Luban Trace</p><h1 class="page-title">Agent 执行记录</h1><p class="page-subtitle" id="runSubtitle"></p></div>
         <span class="run-tag" id="runTag"></span>
       </div>
       <div class="metrics" id="metrics"></div>
       <div class="notice" id="notice"></div>
       <div class="board">
-        <aside class="panel">
-          <div class="panel-title"><strong>运行记录</strong><small id="runCount"></small></div>
-          <nav class="runs-list" id="runsList" aria-label="选择 Run"></nav>
-        </aside>
-        <section class="panel">
+        <section class="panel trace-panel">
           <div class="trace-head">
-            <div class="trace-head-top"><strong>调用树 <span class="separator">/</span> 时间瀑布</strong><small id="nodeCount"></small></div>
+            <div class="trace-head-top">
+              <div><strong>调用链</strong><small class="trace-caption">业务函数、Agent、模型、Skill 与 Tool</small></div>
+              <div class="view-switch" role="group" aria-label="视图切换">
+                <button id="treeMode" class="active" type="button">调用树</button>
+                <button id="timelineMode" type="button">时间线</button>
+              </div>
+            </div>
+            <div class="run-selector"><strong>运行记录</strong><small id="runCount"></small>
+              <nav class="runs-list" id="runsList" aria-label="选择 Run"></nav>
+            </div>
             <div class="trace-tools">
               <input class="search" id="searchInput" type="search" aria-label="搜索节点" placeholder="搜索函数、Agent、模型或工具">
               <button class="text-button" id="expandButton" type="button">全部展开</button>
               <button class="text-button" id="collapseButton" type="button">全部收起</button>
             </div>
           </div>
-          <div class="column-head"><span>执行节点</span><span class="align-right">耗时</span><span class="ticks" id="ticks"></span></div>
+          <div class="column-head"><span id="nodeCount"></span><span class="ticks" id="ticks"></span></div>
           <div class="tree" id="tree" role="tree" aria-label="Trace 执行树"></div>
         </section>
         <aside class="panel detail-panel">

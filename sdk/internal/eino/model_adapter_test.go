@@ -167,6 +167,27 @@ func TestEinoModelAdapterPreservesTemperatureNilAndZero(t *testing.T) {
 	}
 }
 
+func TestResponseToEinoMessagePreservesOptionalUsage(t *testing.T) {
+	withUsage, err := responseToEinoMessage(ModelResponse{
+		Content: []Part{{Type: PartText, Text: "hello"}},
+		Usage:   &ModelUsage{InputTokens: 21, OutputTokens: 9},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withUsage.ResponseMeta == nil || withUsage.ResponseMeta.Usage == nil ||
+		withUsage.ResponseMeta.Usage.PromptTokens != 21 ||
+		withUsage.ResponseMeta.Usage.CompletionTokens != 9 {
+		t.Fatalf("usage lost in Eino response: %+v", withUsage.ResponseMeta)
+	}
+	withoutUsage, err := responseToEinoMessage(ModelResponse{
+		Content: []Part{{Type: PartText, Text: "hello"}},
+	})
+	if err != nil || withoutUsage.ResponseMeta != nil {
+		t.Fatalf("missing usage must remain absent: %+v, %v", withoutUsage, err)
+	}
+}
+
 func TestEinoModelAdapterRejectsUnsupportedMediaAndPreservesInvokerErrors(t *testing.T) {
 	ctx, _ := ginStdContext(t)
 	adapter := &einoModelAdapter{

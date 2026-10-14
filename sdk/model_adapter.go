@@ -75,6 +75,11 @@ func modelRequestFromInternal(request internaleino.ModelRequest) ModelRequest {
 
 func modelResponseToInternal(response ModelResponse) internaleino.ModelResponse {
 	result := internaleino.ModelResponse{FinishReason: response.FinishReason}
+	if response.Usage != nil {
+		result.Usage = &internaleino.ModelUsage{
+			InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
+		}
+	}
 	for _, part := range response.Content {
 		result.Content = append(result.Content, internaleino.Part{
 			Type: internaleino.PartType(part.Type),

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue, demoLog } = require("./trace-data.js");
+const { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue, tokenUsage, demoLog } = require("./trace-data.js");
 
 function event(spanId, parentSpanId = "", overrides = {}) {
   return {
@@ -63,6 +63,41 @@ test("keeps all events visible when parent logs are missing or span IDs collide"
   assert.equal(view.entries[1].issue, "父节点日志缺失");
   assert.equal(view.entries[1].parent.missingId, "lost");
   assert.equal(view.entries[4].issue, "父节点 spanId 重复");
+});
+
+test("truncated run still exposes the received model and Skill below missing agent spans", () => {
+  const view = buildRun([
+    event("s_2", "s_1", { name: "prepareTrustee" }),
+    event("s_9", "s_8", { type: "agent", name: "luban_flow_3",
+      agentName: "luban_flow_3", output: { transferTo: "luban_flow_3_sub_0" } }),
+    event("s_13", "s_12", { type: "model", name: "model" }),
+    event("s_14", "s_12", { type: "skill", name: "skill",
+      input: { arguments: '{"skill":"skill60780"}' } }),
+  ]);
+  assert.equal(view.run, null);
+  assert.equal(view.missingCount, 3);
+  assert.equal(view.displayRoots.length, 3);
+  assert.deepEqual(view.displayRoots.find(entry => entry.missingId === "s_12")
+    .displayChildren.map(entry => displayName(entry.event)), ["模型调用", "加载 Skill · skill60780"]);
+});
+
+test("tokens come only from real model responses and mark missing usage", () => {
+  const view = buildRun([
+    event("s_1", "", { type: "run" }),
+    event("s_2", "s_1", { type: "agent", name: "agent" }),
+    event("s_3", "s_2", { type: "model", output: {
+      usage: { inputTokens: 21, outputTokens: 9 },
+    } }),
+    event("s_4", "s_2", { type: "model", output: {} }),
+    event("s_5", "s_1", { type: "tool", output: {
+      usage: { inputTokens: 1000, outputTokens: 1000 },
+    } }),
+  ]);
+  assert.deepEqual(tokenUsage(view.entries), { input: 21, output: 9, known: 1, models: 2 });
+  assert.deepEqual(tokenUsage(view.entries, view.entries[1]),
+    { input: 21, output: 9, known: 1, models: 2 });
+  assert.deepEqual(tokenUsage(view.entries, view.entries[4]),
+    { input: 0, output: 0, known: 0, models: 0 });
 });
 
 test("older logs gain configured business descriptions without changing technical identity", () => {

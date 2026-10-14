@@ -248,6 +248,30 @@
     return JSON.stringify(value, null, 2) ?? String(value);
   }
 
+  // Only model responses carry gateway usage. Aggregate those events once,
+  // never add Agent/Run totals on top of their child model events.
+  function tokenUsage(entries, ancestor = null) {
+    const models = entries.filter(entry => {
+      if (entry.event.type !== "model") return false;
+      if (!ancestor) return true;
+      for (let parent = entry; parent; parent = parent.parent) {
+        if (parent === ancestor) return true;
+      }
+      return false;
+    });
+    let input = 0, output = 0, known = 0;
+    for (const entry of models) {
+      const usage = entry.event.output?.usage;
+      if (!usage || !Number.isSafeInteger(usage.inputTokens) ||
+          !Number.isSafeInteger(usage.outputTokens) ||
+          usage.inputTokens < 0 || usage.outputTokens < 0) continue;
+      input += usage.inputTokens;
+      output += usage.outputTokens;
+      known++;
+    }
+    return { input, output, known, models: models.length };
+  }
+
   function demoLog() {
     const runId = "run_demo_仅供界面预览";
     const at = ms => new Date(Date.UTC(2026, 9, 14, 2, 24, 30, ms)).toISOString();
@@ -260,10 +284,10 @@
       event("s_2", "s_1", "function", "prepareTrustee", 8, 76, { messageId: "demo-42" }, { messages: ["你好"] }, { flowIndex: 0 }),
       event("s_3", "s_1", "agent", "precheck-model", 99, 138, { messages: ["你好"] }, { isStop: false }, { flowIndex: 1 }),
       event("s_4", "s_3", "agent", "luban_flow_1", 103, 127, { instruction: "示例前置检查" }, { isStop: false }, { agentName: "luban_flow_1" }),
-      event("s_5", "s_4", "model", "precheck-model", 115, 94, { Messages: ["你好"] }, { ToolCalls: [{ Name: "__runtime_output" }] }, { agentName: "luban_flow_1" }),
+      event("s_5", "s_4", "model", "precheck-model", 115, 94, { Messages: ["你好"] }, { ToolCalls: [{ Name: "__runtime_output" }], usage: { inputTokens: 54, outputTokens: 12 } }, { agentName: "luban_flow_1" }),
       event("s_6", "s_1", "agent", "route-model", 251, 515, { messages: ["你好"] }, "子 Agent 完成", { flowIndex: 3 }),
       event("s_7", "s_6", "agent", "luban_flow_3", 260, 132, { instruction: "选择子 Agent" }, { transferTo: "luban_flow_3_sub_0" }, { agentName: "luban_flow_3" }),
-      event("s_8", "s_7", "model", "route-model", 270, 83, { Messages: ["你好"] }, { ToolCalls: [{ Name: "transfer_to_agent" }] }, { agentName: "luban_flow_3" }),
+      event("s_8", "s_7", "model", "route-model", 270, 83, { Messages: ["你好"] }, { ToolCalls: [{ Name: "transfer_to_agent" }], usage: { inputTokens: 78, outputTokens: 8 } }, { agentName: "luban_flow_3" }),
       event("s_9", "s_6", "agent", "luban_flow_3_sub_0", 404, 350, { instruction: "处理咨询" }, "子 Agent 完成", { agentName: "luban_flow_3_sub_0", transferFromSpanId: "s_7" }),
       event("s_10", "s_9", "skill", "skill_demo", 437, 35, { arguments: '{"skill":"skill_demo"}' }, "仅供预览的 Skill 内容", { agentName: "luban_flow_3_sub_0" }),
       event("s_11", "s_9", "tool", "send_wx_msg", 512, 28, { arguments: '{"messages":[]}' }, "候选已记录，未发送", { agentName: "luban_flow_3_sub_0" }),
@@ -271,5 +295,5 @@
     ].map(item => JSON.stringify({ msg: "luban_trace", runId, traceEvent: item })).join("\n");
   }
 
-  return { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue, demoLog };
+  return { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue, tokenUsage, demoLog };
 });

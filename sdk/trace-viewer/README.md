@@ -1,6 +1,10 @@
 # Luban Trace 查看页
 
-本页随 SDK 源码维护：[index.html](index.html)。本机打开页面，粘贴业务日志中的 `luban_trace` JSON 行，点击“解析 Trace”，再按 runId 查看可展开的调用树、时间瀑布和节点输入输出。也可选择本地日志文件；普通业务日志行会被跳过。支持一行一个 `TraceEvent`、一行一个包含 `traceEvent` 字段的日志对象，以及完整的 JSON 数组。
+本页随 SDK 源码维护：[index.html](index.html)。本机打开页面，粘贴业务日志中的 `luban_trace` JSON 行，点击“解析 Trace”，再按 runId 查看可展开的调用树、时间线和节点输入输出。也可选择本地日志文件；普通业务日志行会被跳过。支持一行一个 `TraceEvent`、一行一个包含 `traceEvent` 字段的日志对象，以及完整的 JSON 数组。
+
+页面按最初 Trace 原型保留顶部概览、左侧调用链、右侧节点详情。调用树默认只展示节点名称、类型、状态、耗时以及有来源的 Token；右侧切换“输入”“输出”查看完整 JSON。模型节点的输入和输出 Token 来自业务 `ModelInvoker` 返回的 `ModelResponse.Usage`，SDK 不自行估算。旧日志或网关未返回用量时显示“未提供”；只有部分模型轮次有用量时总数标“部分”。业务适配器需要把网关本次实际返回的 Prompt/Completion Token 映射到 `InputTokens`/`OutputTokens`。
+
+工具不依赖 Wecombot 的业务字段。其他模块注册同一个 SDK `TraceWriter`，把 SDK 的版本 1 `TraceEvent` 直接写成 JSON 行，或者放在业务日志的 `traceEvent` 字段中，即可复用。日志外层的 `level`、`module`、`requestId` 等字段只属于业务包装；页面按 `runId` 分组，要求事件本身保留 `spanId`、`parentSpanId` 等 SDK 字段。若模块只输出自己的业务 JSON、没有 `TraceEvent`，页面不会把它自动解释成调用树。
 
 “查看演示数据”会加载**明确标记的模拟事件**，只供预览布局，不代表真实 Agent 执行结果。页面会提示缺失父节点、重复 spanId 和缺失 Run 根事件，无法判断日志系统是否丢掉了未收到的其他事件。Token 没有来源时显示“未提供”。
 

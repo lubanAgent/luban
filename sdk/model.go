@@ -59,6 +59,15 @@ type ModelResponse struct {
 	Content      []ModelPart
 	ToolCalls    []ToolCall
 	FinishReason string
+	// Usage 是网关返回的本次请求用量；未提供时留 nil，不估算 Token。
+	Usage *ModelUsage `json:"usage,omitempty"`
+}
+
+// ModelUsage 表示一次模型请求的真实用量，不包含网关内部重试的累计消耗。
+// InputTokens 包括网关统计的全部输入（含命中缓存的部分）。
+type ModelUsage struct {
+	InputTokens  int `json:"inputTokens"`
+	OutputTokens int `json:"outputTokens"`
 }
 
 // ToolCall is one tool requested by the model.

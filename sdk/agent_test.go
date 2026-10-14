@@ -83,6 +83,39 @@ type agentSkill struct {
 	Content     string
 }
 
+type dynamicAgentSkillBackend struct {
+	listCalls int
+	getCalls  int
+}
+
+func (b *dynamicAgentSkillBackend) List(ctx *gin.Context) ([]SkillInfo, error) {
+	b.listCalls++
+	scope, ok := CurrentAgent(ctx)
+	if !ok || !scope.IsSubAgent || scope.SubAgentIndex != 0 {
+		return nil, errors.New("SkillBackend did not receive the current child Agent scope")
+	}
+	return []SkillInfo{{
+		Name:        "skill-42",
+		Description: "Instructions for the selected task.",
+	}}, nil
+}
+
+func (b *dynamicAgentSkillBackend) Get(ctx *gin.Context, name string) (Skill, error) {
+	b.getCalls++
+	scope, ok := CurrentAgent(ctx)
+	if !ok || !scope.IsSubAgent || scope.SubAgentIndex != 0 {
+		return Skill{}, errors.New("SkillBackend did not receive the current child Agent scope")
+	}
+	if name != "skill-42" {
+		return Skill{}, fmt.Errorf("unexpected Skill name %q", name)
+	}
+	return Skill{
+		Name:        name,
+		Description: "Instructions for the selected task.",
+		Content:     "Use this dynamically loaded business guidance.",
+	}, nil
+}
+
 type customAgentTool struct {
 	name        string
 	description string
@@ -881,6 +914,102 @@ func TestRunAgentLoadsOnlyConfiguredSkillOnDemand(t *testing.T) {
 	}
 	if !sawSkillBody {
 		t.Fatalf("Skill body was not loaded into the next model request: %+v", requests[1].Messages)
+	}
+}
+
+func TestRunAgentLoadsSkillThroughDynamicBackendWithCurrentGinContext(t *testing.T) {
+	output := lessonReviewResult{Score: 91, Summary: "Used dynamic guidance.", Problems: []string{}}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentInvoker := &scriptedInvoker{responses: []ModelResponse{{
+		ToolCalls: []ToolCall{{
+			ID: "transfer-child", Name: "transfer_to_agent",
+			Arguments: `{"agent_name":"luban_flow_0_sub_0"}`,
+		}},
+		FinishReason: "tool_calls",
+	}}}
+	childInvoker := &scriptedInvoker{responses: []ModelResponse{
+		{ToolCalls: []ToolCall{{
+			ID: "skill-42-call", Name: "skill", Arguments: `{"skill":"skill-42"}`,
+		}}, FinishReason: "tool_calls"},
+		{ToolCalls: []ToolCall{{
+			ID: "output-dynamic", Name: runtimeOutputToolName, Arguments: string(encoded),
+		}}, FinishReason: "tool_calls"},
+	}}
+	backend := &dynamicAgentSkillBackend{}
+	rt, err := New(Options{
+		Config: Config{Agents: map[string]AgentConfig{"agent": {Flow: []NodeConfig{{
+			ModelName:    "parent",
+			SystemPrompt: "Choose a specialist.",
+			SubAgents: []SubAgentConfig{{
+				ModelName:    "review",
+				SystemPrompt: "Review using available Skills.",
+				Skills:       []string{"businessSkills"},
+			}},
+		}, {
+			Func: "CaptureSelectedAgent",
+		}}}}},
+		Models:        map[string]ModelInvoker{"parent": parentInvoker, "review": childInvoker},
+		SkillBackends: map[string]SkillBackend{"businessSkills": backend},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected SubAgentSelection
+	if err := rt.Register(map[string]any{
+		"CaptureSelectedAgent": func(ctx *gin.Context, value lessonReviewResult) lessonReviewResult {
+			var exists bool
+			selected, exists = SelectedSubAgent(ctx)
+			if !exists {
+				t.Error("selected child Agent metadata is unavailable to the following function")
+			}
+			return value
+		},
+	}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := newGinContextForAgentTest(t)
+	result, err := rt.Run(ctx, "agent", Request{
+		Messages: []Message{{Role: RoleUser, Content: []Part{{Type: PartText, Text: "Review the response."}}}},
+		Output:   Output[lessonReviewResult](),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actual, ok := result.(lessonReviewResult); !ok || !reflect.DeepEqual(actual, output) {
+		t.Fatalf("result = %#v (%T), want %#v", result, result, output)
+	}
+	if backend.listCalls == 0 || backend.getCalls != 1 {
+		t.Fatalf("SkillBackend calls = list:%d get:%d, want list>=1 and get=1", backend.listCalls, backend.getCalls)
+	}
+	if selected.Index != 0 || selected.Name != "luban_flow_0_sub_0" ||
+		selected.Description != "" {
+		t.Fatalf("selected child Agent = %+v", selected)
+	}
+
+	requests := childInvoker.snapshot()
+	if len(requests) != 2 {
+		t.Fatalf("model requests = %d, want Skill load and OutputTool", len(requests))
+	}
+	if len(requests[0].Tools) < 2 || requests[0].Tools[len(requests[0].Tools)-1].Name != "skill" {
+		t.Fatalf("Skill middleware did not register Eino Skill tool: %+v", requests[0].Tools)
+	}
+	var sawDynamicContent bool
+	for _, message := range requests[1].Messages {
+		for _, part := range message.Content {
+			if part.Type == PartText && part.Text == "Use this dynamically loaded business guidance." {
+				sawDynamicContent = true
+			}
+		}
+	}
+	if !sawDynamicContent {
+		t.Fatalf("dynamic Skill body was not added to the next model request: %+v", requests[1].Messages)
+	}
+	if len(parentInvoker.snapshot()) != 1 {
+		t.Fatalf("parent model calls = %d, want one transfer", len(parentInvoker.snapshot()))
 	}
 }
 

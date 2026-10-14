@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gin-gonic/gin"
+	internaltrace "github.com/lubanAgent/luban/sdk/internal/trace"
 )
 
 type einoModelAdapter struct {
@@ -28,7 +29,7 @@ func NewModelAdapter(modelName string, temperature *float64, invoker ModelInvoke
 	}
 }
 
-func (m *einoModelAdapter) Generate(ctx context.Context, messages []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+func (m *einoModelAdapter) Generate(ctx context.Context, messages []*schema.Message, opts ...model.Option) (message *schema.Message, resultErr error) {
 	if m == nil || isNilInterface(m.invoker) {
 		return nil, fmt.Errorf("luban: model invoker is nil")
 	}
@@ -42,11 +43,18 @@ func (m *einoModelAdapter) Generate(ctx context.Context, messages []*schema.Mess
 	if err != nil {
 		return nil, err
 	}
+	scope, _ := ginCtx.Get(agentScopeGinKey)
+	agentName := ""
+	if agent, ok := scope.(AgentScope); ok {
+		agentName = agent.Name
+	}
+	_, span := internaltrace.Start(ctx, "model", m.modelName, nil, agentName, request)
 	response, err := invokeModel(m.invoker, ginCtx, request)
+	defer func() { span.End(response, "", resultErr) }()
 	if err != nil {
 		return nil, fmt.Errorf("luban: model %q: %w", m.modelName, err)
 	}
-	message, err := responseToEinoMessage(response)
+	message, err = responseToEinoMessage(response)
 	if err != nil {
 		return nil, fmt.Errorf("luban: model %q response: %w", m.modelName, err)
 	}

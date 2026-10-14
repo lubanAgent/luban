@@ -9,9 +9,49 @@ import (
 
 	"github.com/gin-gonic/gin"
 	internaleino "github.com/lubanAgent/luban/sdk/internal/eino"
+	internaltrace "github.com/lubanAgent/luban/sdk/internal/trace"
 )
 
 const runtimeOutputToolName = internaleino.RuntimeOutputToolName
+
+type publicSkillBackend struct {
+	backend SkillBackend
+}
+
+func (b publicSkillBackend) List(ctx context.Context) ([]internaleino.SkillInfo, error) {
+	ginCtx, err := internaleino.GinContextFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	skills, err := b.backend.List(ginCtx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]internaleino.SkillInfo, 0, len(skills))
+	for _, skill := range skills {
+		result = append(result, internaleino.SkillInfo{
+			Name:        skill.Name,
+			Description: skill.Description,
+		})
+	}
+	return result, nil
+}
+
+func (b publicSkillBackend) Get(ctx context.Context, name string) (internaleino.Skill, error) {
+	ginCtx, err := internaleino.GinContextFrom(ctx)
+	if err != nil {
+		return internaleino.Skill{}, err
+	}
+	skill, err := b.backend.Get(ginCtx, name)
+	if err != nil {
+		return internaleino.Skill{}, err
+	}
+	return internaleino.Skill{
+		Name:        skill.Name,
+		Description: skill.Description,
+		Content:     skill.Content,
+	}, nil
+}
 
 func (rt *Runtime) runAgentNode(
 	ctx context.Context,
@@ -64,7 +104,10 @@ func (rt *Runtime) runRequestAgent(
 	parentConfig, parentInvoker, err := rt.makeEinoAgentConfig(
 		parentName, node.Description, node.ModelName, node.SystemPrompt,
 		node.Temperature, node.MaxLoopCount, node.Tools, node.Skills,
-		request.Output, len(node.SubAgents) > 0,
+		request.Output, internaleino.AgentScope{
+			AppKey: appKey, FlowIndex: flowIndex, Name: parentName,
+			ModelName: node.ModelName, Description: node.Description,
+		}, len(node.SubAgents) > 0,
 	)
 	if err != nil {
 		return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] Agent setup: %w", appKey, flowIndex, err)
@@ -75,14 +118,18 @@ func (rt *Runtime) runRequestAgent(
 	}
 
 	children := make([]*internaleino.ChatModelAgent, 0, len(node.SubAgents))
-	childNames := make(map[string]struct{}, len(node.SubAgents))
+	childNames := make(map[string]int, len(node.SubAgents))
 	for childIndex, child := range node.SubAgents {
 		childName := fmt.Sprintf("luban_flow_%d_sub_%d", flowIndex, childIndex)
-		childNames[childName] = struct{}{}
+		childNames[childName] = childIndex
 		childConfig, childInvoker, err := rt.makeEinoAgentConfig(
 			childName, child.Description, child.ModelName, child.SystemPrompt,
 			child.Temperature, child.MaxLoopCount, child.Tools, child.Skills,
-			request.Output, false,
+			request.Output, internaleino.AgentScope{
+				AppKey: appKey, FlowIndex: flowIndex, Name: childName,
+				ModelName: child.ModelName, Description: child.Description,
+				IsSubAgent: true, SubAgentIndex: childIndex,
+			}, false,
 		)
 		if err != nil {
 			return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] subAgents[%d] setup: %w", appKey, flowIndex, childIndex, err)
@@ -110,9 +157,14 @@ func (rt *Runtime) runRequestAgent(
 			// The parent only chooses a child. Its own text is not a business result.
 			return nodeValue{Value: nil, HasValue: true}, nil
 		}
-		if _, exists := childNames[runResult.TransferredTo]; !exists {
+		selectedIndex, exists := childNames[runResult.TransferredTo]
+		if !exists {
 			return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] transferred to unknown child %q", appKey, flowIndex, runResult.TransferredTo)
 		}
+		ginCtx.Set(selectedSubAgentGinKey, SubAgentSelection{
+			Index: selectedIndex, Name: runResult.TransferredTo,
+			Description: node.SubAgents[selectedIndex].Description,
+		})
 		if request.Output != nil {
 			value, exists := collector.Load(runResult.OutputAgentName, runResult.OutputCallID)
 			if runResult.OutputAgentName != runResult.TransferredTo || !exists {
@@ -153,6 +205,7 @@ func (rt *Runtime) makeEinoAgentConfig(
 	maxLoopCount *int,
 	toolNames, skillNames []string,
 	output *OutputSpec,
+	scope internaleino.AgentScope,
 	isParent bool,
 ) (internaleino.AgentConfig, internaleino.ModelInvoker, error) {
 	invoker, exists := rt.models[modelName]
@@ -182,16 +235,24 @@ func (rt *Runtime) makeEinoAgentConfig(
 	}
 
 	agentSkills := make([]internaleino.Skill, 0, len(skillNames))
+	agentSkillBackends := make([]internaleino.SkillBackendSource, 0, len(skillNames))
 	for _, skillName := range skillNames {
-		skill, exists := rt.skills[skillName]
-		if !exists {
-			return internaleino.AgentConfig{}, nil, fmt.Errorf("Skill %q was not registered", skillName)
+		if skill, exists := rt.skills[skillName]; exists {
+			agentSkills = append(agentSkills, internaleino.Skill{
+				Name:        skill.Name,
+				Description: skill.Description,
+				Content:     skill.Content,
+			})
+			continue
 		}
-		agentSkills = append(agentSkills, internaleino.Skill{
-			Name:        skill.Name,
-			Description: skill.Description,
-			Content:     skill.Content,
-		})
+		if backend, exists := rt.skillBackends[skillName]; exists {
+			agentSkillBackends = append(agentSkillBackends, internaleino.SkillBackendSource{
+				Name:    skillName,
+				Backend: publicSkillBackend{backend: backend},
+			})
+			continue
+		}
+		return internaleino.AgentConfig{}, nil, fmt.Errorf("Skill or SkillBackend %q was not registered", skillName)
 	}
 
 	var outputType reflect.Type
@@ -203,16 +264,18 @@ func (rt *Runtime) makeEinoAgentConfig(
 	}
 
 	config := internaleino.AgentConfig{
-		Name:         name,
-		Description:  description,
-		ModelName:    modelName,
-		SystemPrompt: systemPrompt,
-		Temperature:  cloneFloat64(temperature),
-		MaxLoopCount: cloneInt(maxLoopCount),
-		Tools:        agentTools,
-		Skills:       agentSkills,
-		OutputType:   outputType,
-		IsParent:     isParent,
+		Name:          name,
+		Description:   description,
+		ModelName:     modelName,
+		SystemPrompt:  systemPrompt,
+		Temperature:   cloneFloat64(temperature),
+		MaxLoopCount:  cloneInt(maxLoopCount),
+		Tools:         agentTools,
+		Skills:        agentSkills,
+		SkillBackends: agentSkillBackends,
+		Scope:         scope,
+		OutputType:    outputType,
+		IsParent:      isParent,
 	}
 	return config, publicModelInvoker{invoker: invoker}, nil
 }
@@ -290,10 +353,24 @@ func (rt *Runtime) runBatchItem(
 		return batchItemValue{err: err}
 	}
 	itemGinCtx := baseGinCtx.Copy()
-	itemCtx, err := contextForGin(itemGinCtx)
+	// Keep this item's isolated Gin context while retaining the parent Run's
+	// trace recorder and span, including concurrent sibling Batch items.
+	itemCtx, err := internaleino.WithGinContext(parentCtx, itemGinCtx)
 	if err != nil {
 		return batchItemValue{err: err}
 	}
+	itemCtx, itemSpan := internaltrace.Start(itemCtx, "batchItem", fmt.Sprintf("item[%d]", itemIndex), &flowIndex, "", batch.Items[itemIndex])
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			itemSpan.End(nil, "", fmt.Errorf("Batch item panicked: %v", recovered))
+			panic(recovered)
+		}
+		if result.err != nil {
+			itemSpan.End(nil, "", result.err)
+		} else {
+			itemSpan.End(result.value, "", nil)
+		}
+	}()
 	itemRequest := Request{Messages: batch.Items[itemIndex].Messages, Output: batch.Output}
 	itemOutput, err := rt.runRequestAgent(
 		itemCtx,

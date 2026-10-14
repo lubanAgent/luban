@@ -2,6 +2,8 @@ package luban
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
@@ -10,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	internaleino "github.com/lubanAgent/luban/sdk/internal/eino"
 	"github.com/lubanAgent/luban/sdk/internal/executor"
+	internaltrace "github.com/lubanAgent/luban/sdk/internal/trace"
 )
 
 var errStopCurrentFlow = errors.New("luban: stop current flow")
@@ -43,7 +46,7 @@ const runStateGinKey = "__luban_runtime_state_v1"
 // the first flow node; later nodes receive the preceding node's business
 // output.
 func (rt *Runtime) Run(ctx *gin.Context, appKey string, input any) (result any, resultErr error) {
-	return rt.runFrom(ctx, appKey, "", input)
+	return rt.runFrom(ctx, appKey, "", false, input)
 }
 
 // RunFrom executes the Agent identified by appKey beginning at the registered
@@ -57,13 +60,22 @@ func (rt *Runtime) Run(ctx *gin.Context, appKey string, input any) (result any, 
 // caller supplies that node's input; RunFrom does not restore or retain any
 // state from an earlier Run.
 func (rt *Runtime) RunFrom(ctx *gin.Context, appKey, startFunc string, input any) (result any, resultErr error) {
-	if startFunc == "" {
-		return nil, fmt.Errorf("luban: start function must not be empty")
-	}
-	return rt.runFrom(ctx, appKey, startFunc, input)
+	return rt.runFrom(ctx, appKey, startFunc, true, input)
 }
 
-func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, input any) (result any, resultErr error) {
+func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireStartFunc bool, input any) (result any, resultErr error) {
+	var runSpan *internaltrace.Span
+	runStopped := false
+	defer func() {
+		if runSpan == nil {
+			return
+		}
+		status := ""
+		if runStopped && resultErr == nil {
+			status = "stopped"
+		}
+		runSpan.End(result, status, resultErr)
+	}()
 	activeNode := "Run setup"
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -85,12 +97,30 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, input any
 	if ctx == nil {
 		return nil, fmt.Errorf("luban: Gin context must not be nil")
 	}
-	if appKey == "" {
-		return nil, fmt.Errorf("luban: appKey must not be empty")
+	runIDBytes := make([]byte, 16)
+	if _, err := rand.Read(runIDBytes); err != nil {
+		return nil, fmt.Errorf("luban: generate run ID: %w", err)
 	}
+	ctx.Set(runIDGinKey, "run_"+hex.EncodeToString(runIDBytes))
 	stdCtx, err := contextForGin(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if rt != nil && !isNilInterface(rt.traceWriter) {
+		stdCtx = internaltrace.Begin(stdCtx, RunID(ctx), func(current context.Context, event internaltrace.Event) {
+			ginCtx, lookupErr := ginContextFrom(current)
+			if lookupErr == nil {
+				rt.traceWriter.WriteTrace(ginCtx, event)
+			}
+		})
+		stdCtx, runSpan = internaltrace.Start(stdCtx, "run", appKey, nil, "",
+			traceNodeValue(nodeValue{Value: input, HasValue: true}))
+	}
+	if appKey == "" {
+		return nil, fmt.Errorf("luban: appKey must not be empty")
+	}
+	if requireStartFunc && startFunc == "" {
+		return nil, fmt.Errorf("luban: start function must not be empty")
 	}
 	if err := stdCtx.Err(); err != nil {
 		return nil, err
@@ -126,13 +156,34 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, input any
 	state := &runState{}
 	ctx.Set(runStateGinKey, state)
 	defer clearGinKey(ctx, runStateGinKey)
+	clearGinKey(ctx, selectedSubAgentGinKey)
+	defer clearGinKey(ctx, selectedSubAgentGinKey)
 
 	steps := make([]internaleino.Step, 0, len(snapshot.config.Flow)-startIndex)
 	for index := startIndex; index < len(snapshot.config.Flow); index++ {
 		node := snapshot.config.Flow[index]
 		index, node := index, node
-		steps = append(steps, func(current context.Context, incoming nodeValue) (nodeValue, error) {
+		steps = append(steps, func(current context.Context, incoming nodeValue) (returned nodeValue, returnedErr error) {
 			activeNode = fmt.Sprintf("flow[%d]", index)
+			kind, name := "function", node.Func
+			if node.Func == "" {
+				kind, name = "agent", node.ModelName
+			}
+			traceCtx, span := internaltrace.Start(current, kind, name, &index, "", traceNodeValue(incoming), node.Description)
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					span.End(nil, "", fmt.Errorf("node panicked: %v", recovered))
+					panic(recovered)
+				}
+				status := ""
+				if state.stopped.Load() && returnedErr != nil && errors.Is(returnedErr, errStopCurrentFlow) {
+					status = "stopped"
+					span.End(traceNodeValue(state.stopNode), status, nil)
+					return
+				}
+				span.End(traceNodeValue(returned), status, returnedErr)
+			}()
+			current = traceCtx
 			if err := current.Err(); err != nil {
 				return nodeValue{}, err
 			}
@@ -185,6 +236,7 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, input any
 		return nil, fmt.Errorf("luban: appKey %q: %w", appKey, cancelErr)
 	}
 	if errors.Is(runErr, errStopCurrentFlow) {
+		runStopped = true
 		output, runErr = state.stopNode, nil
 	}
 	if runErr != nil {
@@ -194,6 +246,28 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, input any
 		return map[string]any{}, nil
 	}
 	return output.Value, nil
+}
+
+func traceNodeValue(value nodeValue) any {
+	if !value.HasValue {
+		return map[string]any{"_traceNoBusinessValue": true}
+	}
+	switch item := value.Value.(type) {
+	case Request:
+		output := ""
+		if item.Output != nil && item.Output.goType != nil {
+			output = item.Output.goType.String()
+		}
+		return map[string]any{"messages": item.Messages, "outputType": output}
+	case Batch:
+		output := ""
+		if item.Output != nil && item.Output.goType != nil {
+			output = item.Output.goType.String()
+		}
+		return map[string]any{"items": item.Items, "concurrency": item.Concurrency, "outputType": output}
+	default:
+		return item
+	}
 }
 
 func (rt *Runtime) validateFlowSignatures(flow []NodeConfig) error {

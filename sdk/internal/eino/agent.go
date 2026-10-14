@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	internaltrace "github.com/lubanAgent/luban/sdk/internal/trace"
 )
 
 const skillToolName = "skill"
@@ -20,16 +21,18 @@ type ChatModelAgent = adk.ChatModelAgent
 type Agent = adk.Agent
 
 type AgentConfig struct {
-	Name         string
-	Description  string
-	ModelName    string
-	SystemPrompt string
-	Temperature  *float64
-	MaxLoopCount *int
-	Tools        []Tool
-	Skills       []Skill
-	OutputType   reflect.Type
-	IsParent     bool
+	Name          string
+	Description   string
+	ModelName     string
+	SystemPrompt  string
+	Temperature   *float64
+	MaxLoopCount  *int
+	Tools         []Tool
+	Skills        []Skill
+	SkillBackends []SkillBackendSource
+	Scope         AgentScope
+	OutputType    reflect.Type
+	IsParent      bool
 }
 
 // NewAgent creates an Eino ChatModelAgent using only the internal DTOs and
@@ -60,9 +63,12 @@ func NewAgent(ctx context.Context, config AgentConfig, invoker ModelInvoker, col
 		returnDirectly[RuntimeOutputToolName] = true
 	}
 
-	middlewares := make([]adk.ChatModelAgentMiddleware, 0, 1)
-	if len(config.Skills) > 0 {
-		backend, err := newMemorySkillBackend(config.Skills)
+	middlewares := []adk.ChatModelAgentMiddleware{
+		&agentScopeMiddleware{scope: config.Scope},
+		&traceToolMiddleware{agentName: config.Name},
+	}
+	if len(config.Skills) > 0 || len(config.SkillBackends) > 0 {
+		backend, err := newEinoSkillBackend(config.Skills, config.SkillBackends)
 		if err != nil {
 			return nil, err
 		}
@@ -141,8 +147,15 @@ func RunAgent(
 	agent adk.Agent,
 	messages []*schema.Message,
 	parentName string,
-) (AgentResult, error) {
-	result := AgentResult{AssistantText: make(map[string]string)}
+) (result AgentResult, resultErr error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			internaltrace.FinishAgents(ctx, nil, fmt.Errorf("Agent panicked: %v", recovered))
+			panic(recovered)
+		}
+		internaltrace.FinishAgents(ctx, result, resultErr)
+	}()
+	result = AgentResult{AssistantText: make(map[string]string)}
 	iterator := agent.Run(ctx, &adk.AgentInput{Messages: messages})
 	var runErrors []error
 	for {
@@ -162,6 +175,7 @@ func RunAgent(
 		}
 		if event.Action != nil && event.Action.TransferToAgent != nil {
 			result.TransferredTo = event.Action.TransferToAgent.DestAgentName
+			internaltrace.FinishAgent(ctx, eventAgentName, map[string]any{"transferTo": result.TransferredTo}, "success", nil)
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil {
 			continue
@@ -205,7 +219,7 @@ func checkAgentToolNames(config AgentConfig) error {
 			return err
 		}
 	}
-	if len(config.Skills) > 0 {
+	if len(config.Skills) > 0 || len(config.SkillBackends) > 0 {
 		if err := add(skillToolName, "Skill loader"); err != nil {
 			return err
 		}

@@ -43,10 +43,11 @@ type Skill struct {
 }
 
 type Registry struct {
-	Functions map[string]struct{}
-	Models    map[string]struct{}
-	Tools     map[string]struct{}
-	Skills    map[string]Skill
+	Functions     map[string]struct{}
+	Models        map[string]struct{}
+	Tools         map[string]struct{}
+	Skills        map[string]Skill
+	SkillBackends map[string]struct{}
 }
 
 type Snapshot struct {
@@ -137,11 +138,14 @@ func collectSkills(
 	dest map[string]Skill,
 ) error {
 	for _, name := range names {
-		skill, exists := registry.Skills[name]
-		if !exists {
-			return fmt.Errorf("luban: appKey %q %s Skill %q was not registered", appKey, location, name)
+		if skill, exists := registry.Skills[name]; exists {
+			dest[name] = skill
+			continue
 		}
-		dest[name] = skill
+		if _, exists := registry.SkillBackends[name]; exists {
+			continue
+		}
+		return fmt.Errorf("luban: appKey %q %s Skill or SkillBackend %q was not registered", appKey, location, name)
 	}
 	return nil
 }

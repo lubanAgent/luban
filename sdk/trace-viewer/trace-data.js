@@ -69,10 +69,9 @@
   function readConfig(text) {
     if (!String(text).trim()) return null;
     const config = JSON.parse(String(text));
-    if (!config || typeof config !== "object" || !config.agents ||
-        typeof config.agents !== "object" || Array.isArray(config.agents))
-      throw new Error("配置需要包含 agents 对象");
-    return config.agents;
+    if (!config || typeof config !== "object" || Array.isArray(config))
+      throw new Error("配置根对象需要以 Agent key 为字段");
+    return config;
   }
 
   // Older logs predate TraceEvent.description. Resolve only configured node

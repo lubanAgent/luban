@@ -21,7 +21,7 @@
     <details class="config-import">
       <summary>旧日志没有业务名称？可附加 Agent 配置 JSON</summary>
       <p>仅用 flow 下标和已注册节点名匹配 description。新日志会直接携带描述；配置不会上传。</p>
-      <textarea id="configInput" spellcheck="false" aria-label="Agent 配置 JSON" placeholder='{"agents":{"trustee":{"flow":[{"func":"prepareTrustee","description":"准备会话数据"}]}}}'></textarea>
+      <textarea id="configInput" spellcheck="false" aria-label="Agent 配置 JSON" placeholder='{"trustee":{"flow":[{"func":"prepareTrustee","description":"准备会话数据"}]}}'></textarea>
       <label class="file-label" for="configFile">选择配置文件</label><input id="configFile" type="file" accept=".json,application/json" hidden>
     </details>
     <div class="import-actions">

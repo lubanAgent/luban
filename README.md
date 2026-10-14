@@ -34,14 +34,12 @@ go test -run '^ExampleRuntime_Run$' -v
 
 ```json
 {
-  "agents": {
-    "lessonReview": {
-      "flow": [
-        { "func": "PrepareReview", "description": "准备课程资料" },
-        { "modelName": "reviewModel", "systemPrompt": "请简要评价课程内容。" },
-        { "func": "SaveReview", "description": "保存评价" }
-      ]
-    }
+  "lessonReview": {
+    "flow": [
+      { "func": "PrepareReview", "description": "准备课程资料" },
+      { "modelName": "reviewModel", "systemPrompt": "请简要评价课程内容。" },
+      { "func": "SaveReview", "description": "保存评价" }
+    ]
   }
 }
 ```

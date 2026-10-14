@@ -317,7 +317,7 @@ func TestLoadSnapshotRejectsForbiddenChildFieldsAfterJSONAndYAMLDecode(t *testin
 	for _, decoder := range decoders {
 		for _, field := range fields {
 			t.Run(decoder.name+"/"+field.name, func(t *testing.T) {
-				raw := []byte(`{"agents":{"review":{"flow":[{"modelName":"model","systemPrompt":"parent","subAgents":[{"modelName":"child","systemPrompt":"child",` + field.raw + `}]}]}}}`)
+				raw := []byte(`{"review":{"flow":[{"modelName":"model","systemPrompt":"parent","subAgents":[{"modelName":"child","systemPrompt":"child",` + field.raw + `}]}]}}`)
 				var config Config
 				if err := decoder.fn(raw, &config); err != nil {
 					t.Fatal(err)

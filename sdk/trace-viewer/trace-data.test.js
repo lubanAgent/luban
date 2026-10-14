@@ -66,7 +66,7 @@ test("keeps all events visible when parent logs are missing or span IDs collide"
 });
 
 test("older logs gain configured business descriptions without changing technical identity", () => {
-  const config = readConfig(JSON.stringify({ agents: { trustee: {
+  const config = readConfig(JSON.stringify({ trustee: {
     description: "托管智能体",
     flow: [
       { func: "prepareTrustee", description: "准备会话资料" },
@@ -74,7 +74,7 @@ test("older logs gain configured business descriptions without changing technica
         modelName: "model-B", description: "subAgentId=9；门店员工\n负责跟进"
       }] },
     ],
-  } } }));
+  } }));
   const events = [
     event("s_2", "s_1", { type: "function", name: "prepareTrustee", flowIndex: 0 }),
     event("s_3", "s_1", { type: "agent", name: "model-A", flowIndex: 1 }),
@@ -91,7 +91,7 @@ test("older logs gain configured business descriptions without changing technica
   assert.equal(displayName(described[4]), "模型调用");
   assert.equal(displayName({ type: "skill", name: "skill", input: { arguments: '{"skill":"skill60778"}' } }),
     "加载 Skill · skill60778");
-  assert.throws(() => readConfig('{"wrong":{}}'), /agents/);
+  assert.throws(() => readConfig('[]'), /Agent key/);
 });
 
 test("old transfer logs display selector and child as sequential siblings", () => {

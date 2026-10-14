@@ -1,10 +1,6 @@
-// Package luban provides a small Go API for building AI applications with
-// Luban. Business modules provide configuration, model gateway adapters,
-// functions, Tools, and Skills. The Runtime adapts them to Eino and executes
-// an ordered Agent flow.
+// Package luban 提供构建 AI Agent 的简洁 Go 接口。业务模块提供配置、模型网关
+// 适配器、业务函数、Tool 和 Skill；Runtime 内部使用 Eino 执行顺序流程。
 //
-// The SDK is validated with offline fake models and is integrated into the
-// admissions SchoolPicker stage through the host module's model gateway
-// adapter. Full database-backed strategy pipeline execution remains a
-// separate admissions integration check.
+// SDK 可以用离线模型独立验证。接入真实业务时，模型 HTTP 请求、业务数据读写
+// 和外部副作用仍由宿主模块实现；参见仓库根目录的中文接入指南。
 package luban

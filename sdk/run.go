@@ -20,27 +20,48 @@ var errStopCurrentFlow = errors.New("luban: stop current flow")
 type nodeValue = internaleino.NodeValue
 
 type runState struct {
+	active   atomic.Bool
 	stopped  atomic.Bool
 	stopNode nodeValue
 }
 
+// Only the currently executing flow function receives an active permission.
+// Gin copies may retain this pointer, so clearing the original Gin key alone
+// would not revoke a previous function's ability to stop later steps.
+type stopPermission struct {
+	state  *runState
+	active atomic.Bool
+}
+
 // Stop requests that the current flow ends after the calling business function
 // returns. The function must return normally; an error or cancellation wins.
+// Calling Stop from a Tool is an execution error, not a successful flow stop.
+// Outside an active Run, Stop does nothing.
 func Stop(ctx *gin.Context) {
 	if ctx == nil {
 		return
+	}
+	if err := internaleino.RejectToolStop(ctx); err != nil {
+		panic(err)
 	}
 	value, exists := ctx.Get(runStateGinKey)
 	if !exists {
 		return
 	}
 	state, ok := value.(*runState)
-	if ok && state != nil {
-		state.stopped.Store(true)
+	if !ok || state == nil || !state.active.Load() {
+		return
 	}
+	value, _ = ctx.Get(stopPermissionGinKey)
+	permission, _ := value.(*stopPermission)
+	if permission == nil || permission.state != state || !permission.active.Load() {
+		panic(fmt.Errorf("luban: Stop is only allowed inside the current flow business function"))
+	}
+	state.stopped.Store(true)
 }
 
 const runStateGinKey = "__luban_runtime_state_v1"
+const stopPermissionGinKey = "__luban_stop_permission_v1"
 
 // Run executes the Agent identified by appKey. The initial input is passed to
 // the first flow node; later nodes receive the preceding node's business
@@ -64,6 +85,15 @@ func (rt *Runtime) RunFrom(ctx *gin.Context, appKey, startFunc string, input any
 }
 
 func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireStartFunc bool, input any) (result any, resultErr error) {
+	var data *runData
+	defer func() {
+		// Run's final trace callback may still read the data. Cleanup happens
+		// after that callback and invalidates all retained Gin copies.
+		if data != nil {
+			data.close()
+			clearGinKey(ctx, sharedDataGinKey)
+		}
+	}()
 	var runSpan *internaltrace.Span
 	runStopped := false
 	defer func() {
@@ -97,6 +127,8 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 	if ctx == nil {
 		return nil, fmt.Errorf("luban: Gin context must not be nil")
 	}
+	data = &runData{values: make(map[string]any)}
+	ctx.Set(sharedDataGinKey, data)
 	runIDBytes := make([]byte, 16)
 	if _, err := rand.Read(runIDBytes); err != nil {
 		return nil, fmt.Errorf("luban: generate run ID: %w", err)
@@ -154,6 +186,8 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 	}
 
 	state := &runState{}
+	state.active.Store(true)
+	defer state.active.Store(false)
 	ctx.Set(runStateGinKey, state)
 	defer clearGinKey(ctx, runStateGinKey)
 	clearGinKey(ctx, selectedSubAgentGinKey)
@@ -199,7 +233,7 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 				nodeName = node.ModelName
 				output, callbackErr = rt.runAgentNode(current, ginCtx, appKey, index, node, incoming)
 			} else {
-				output, callbackErr = rt.callFunction(appKey, index, node.Func, ginCtx, incoming)
+				output, callbackErr = rt.callFlowFunction(state, appKey, index, node.Func, ginCtx, incoming)
 			}
 			activeNode = fmt.Sprintf("flow[%d] node %q", index, nodeName)
 			if cancelErr := current.Err(); cancelErr != nil {
@@ -330,6 +364,17 @@ func clearGinKey(ctx *gin.Context, key string) {
 		return
 	}
 	ctx.Set(key, nil)
+}
+
+func (rt *Runtime) callFlowFunction(state *runState, appKey string, index int, key string, ctx *gin.Context, incoming nodeValue) (nodeValue, error) {
+	permission := &stopPermission{state: state}
+	permission.active.Store(true)
+	ctx.Set(stopPermissionGinKey, permission)
+	defer func() {
+		permission.active.Store(false)
+		clearGinKey(ctx, stopPermissionGinKey)
+	}()
+	return rt.callFunction(appKey, index, key, ctx, incoming)
 }
 
 func (rt *Runtime) callFunction(appKey string, index int, key string, ctx *gin.Context, incoming nodeValue) (out nodeValue, err error) {

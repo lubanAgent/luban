@@ -1,63 +1,122 @@
 # 鲁班（Luban）
 
-鲁班是一套面向 Go 业务研发的 AI Agent 开发框架。目标是让常见的 AI 流程有一套简单、固定的写法：配置执行顺序，注册必要的业务函数、Tool 和 Skill，接入现有模型网关，就能在业务的 HTTP、MQ 或定时任务入口执行 Agent。业务不必先掌握 Eino 的各种编排方式；鲁班在内部使用 Eino，统一处理模型调用循环、工具调用和节点传值。
+**让 Go 研发用一份配置和必要的业务函数，快速构建 Agent。**
 
-鲁班让业务保留自己熟悉的代码：取数、领域规则、持久化、对外发送与模型网关 HTTP 调用仍由业务实现。SDK 负责顺序调度、输入输出适配、Agent/子 Agent、Tool/Skill 接入和执行记录。它适合明确的顺序流程，不打算覆盖所有通用工作流能力。
+基于 Eino，把模型调用、Tool、Skill 和节点传值整理成统一写法。业务专注取数、领域规则和结果处理，常见流程无需直接编写 Eino 编排代码。
 
-> 当前是开发中的 SDK，尚未发布正式版本。公开模块为 `github.com/lubanAgent/luban/sdk`，Go 包名为 `luban`。仓库中的接入示例以源码和离线测试为准；正式版本号与开源许可证将在首次正式发布前确定。
+> 开发中，尚未发布正式版本；许可证将在首次正式发布前确定。模块：`github.com/lubanAgent/luban/sdk`，包名：`luban`，需要 Go 1.24.1 或更高版本。
 
-## 能做什么
+[快速接入](docs/快速接入.md) · [Eino / Luban 同需求对照](docs/Eino与Luban对照.md) · [变更记录](CHANGELOG.md) · [参与开发](CONTRIBUTING.md)
 
-| 能力 | 当前行为 |
-| --- | --- |
-| Agent 编排 | 一套配置中的 `flow` 按顺序执行；业务函数节点负责业务逻辑，Agent 节点负责模型任务。 |
-| 模型与工具 | Agent 可独立配置模型、`systemPrompt`、温度和 `maxLoopCount`；模型决定调用哪些已注册的 Tool。 |
-| Skill | 静态 Skill 可由业务注册；也可通过 `SkillBackend` 在运行时提供；Agent 按需加载。 |
-| 子 Agent | 父 Agent 负责选择并移交给一个子 Agent；子 Agent 使用自己的模型、提示词、Tool 和 Skill。 |
-| 数据传递 | 相邻节点传递函数返回值；业务准备 `Request.Messages` 作为动态 userPrompt/媒体输入；`Output[T]()` 可声明结构化结果。 |
-| Batch | 多条输入并发处理，按输入下标收集各项结果和错误。 |
-| 业务入口 | 提供 Gin HTTP、MQ 回调、Cron 适配器，也可直接调用 `Runtime.Run`。 |
-| Trace | 可选 `TraceWriter` 接收执行事件；本地查看页按 Run 展示节点、模型、Tool、Skill 与输入输出。 |
+## 看一个通话摘要
 
-当前没有配置分支或回跳、跨请求暂停恢复、远端配置平台和 Trace 服务。模型请求由业务提供的 `ModelInvoker` 发往已有网关，SDK 不内置厂商 HTTP 客户端，也不依赖公司内部包。
+一套 Agent 配置中的 `flow` 按顺序执行，两种节点分别负责业务逻辑和 AI 处理：
 
-## 快速体验
-
-仓库带有**无需网络和模型密钥**的示例，展示 `PrepareReview → Agent → SaveReview` 的完整传值：
-
-```sh
-cd sdk
-go test -run '^ExampleRuntime_Run$' -v
+```mermaid
+flowchart LR
+    A["业务节点 · PrepareCall<br/>解析请求，准备通话文本"] -->|"Request.Messages"| B["Agent 节点<br/>生成通话摘要"]
+    B -->|"string"| C["业务节点 · BuildResult<br/>整理返回结果"]
 ```
 
-源码见 [可运行示例](sdk/example_test.go)。一个 Agent 的配置如下；第一个函数构造模型消息，模型输出再交给最后一个函数：
+下面就是这个流程的配置。`func` 对应注册的业务函数，`modelName` 对应接入的模型调用器：
 
 ```json
 {
-  "lessonReview": {
+  "callSummary": {
     "flow": [
-      { "func": "PrepareReview", "description": "准备课程资料" },
-      { "modelName": "reviewModel", "systemPrompt": "请简要评价课程内容。" },
-      { "func": "SaveReview", "description": "保存评价" }
+      { "func": "PrepareCall" },
+      { "modelName": "demo", "systemPrompt": "用一句话总结通话中的诉求和后续安排。" },
+      { "func": "BuildResult" }
     ]
   }
 }
 ```
 
-业务启动时加载配置，使用 `luban.New(luban.Options{Config: config, Models: models})` 创建 Runtime，再调用 `rt.Register(funcs, tools, skills)`；在业务入口执行 `rt.Run(ctx, "lessonReview", input)`。模型适配器只做一轮请求与响应协议转换，Tool 循环由框架处理。详细代码和接入步骤见 [快速接入](docs/快速接入.md)。
+固定指令放在 `systemPrompt`；每次请求的通话文本，由 `PrepareCall` 返回的 `Request.Messages` 提供。业务按需注册 Tool 和 Skill，在 Agent 节点的 `tools`、`skills` 中引用即可。
 
-## 执行记录
+## 直接运行
 
-业务可选实现 `TraceWriter`，把完成的 Run、函数、Agent、模型、Tool、Skill 和 Batch 事件写入现有日志；用 `luban.RunID(ctx)` 关联同一次执行。日志含实际输入输出，可能包含用户消息和 Skill 正文，应按业务环境管理。
-
-[本地 Trace 查看页](sdk/trace-viewer/index.html)无需服务端，支持粘贴或选择日志、按 runId 查看执行树和时间线。它是诊断原型，不是持久化 Trace 服务；[查看页说明](sdk/trace-viewer/README.md)介绍日志格式与展示规则。
-
-## 开发与参与
-
-SDK 在独立的 `sdk/go.mod` 中，Go 最低版本以该文件为准。仓库根目录运行：
+在包含 SDK 源码的仓库检出目录运行：
 
 ```sh
-make check-sdk
+cd sdk
+go run ./examples/call-summary
 ```
 
-命令检查格式、模块依赖、单元与竞态测试、`go vet` 和公司内部依赖边界。Trace 页面解析器另用 `node --test sdk/trace-viewer/trace-data.test.js` 检查。[参与开发](CONTRIBUTING.md)说明本地验证和提交要求。
+不需要模型密钥、数据库或业务服务。首次安装 Go 依赖可能需要联网；示例执行不请求外部服务，使用模拟模型返回固定摘要：
+
+```text
+模式：模拟模型，不访问外部服务
+输入：{"text":"客户：想了解周末的课程。顾问：明天下午发课程安排，再电话确认。"}
+输出：{"summary":"客户想了解周末课程，顾问将于明天下午发送课程安排并电话确认。"}
+```
+
+这个例子真实执行了 **JSON 加载 → 初始化注册 → Gin 路由 → SDK Handler → 三个节点 → JSON 响应**，默认通过内存 HTTP 请求运行，不监听端口。它不代表真实模型的摘要质量，也不读写数据库。
+
+[查看完整示例](sdk/examples/call-summary/main.go) · [配置文件](sdk/examples/call-summary/agent.json) · [模拟模型](sdk/examples/call-summary/model.go)
+
+## 接入自己的项目
+
+| 时机 | 业务需要做什么 |
+| --- | --- |
+| 定义流程 | 写 Agent 配置和必要的业务函数，按需提供 Tool、Skill。 |
+| 启动时 | 加载 JSON，提供模型调用器，调用 `New` 和 `Register`。 |
+| 绑定入口 | 把 SDK Handler 注册到现有 HTTP、MQ 或 Cron 入口。 |
+| 收到任务 | SDK 按配置执行；业务函数负责取数、校验、保存或其他业务动作。 |
+
+例如，初始化完成后，在已有 Gin 路由中绑定：
+
+```go
+router.POST("/summary", lubanhttp.Handler(rt, "callSummary", render))
+```
+
+Handler 内部执行 `Run`。首节点解析请求，末节点返回结果，业务的 `render` 决定接口响应格式。MQ 和 Cron 也有对应适配器。
+
+模型通过业务实现的 `ModelInvoker` 接入：业务负责现有网关的 HTTP、鉴权、超时、重试和协议转换；Luban 负责 Agent 循环、Tool/Skill 调用和节点传值。SDK 不内置厂商 HTTP 客户端，也不依赖公司内部包。
+
+**[按步骤接入：完整代码、函数约定、模型替换、HTTP/MQ/Cron](docs/快速接入.md)**
+
+## 为什么使用 Luban
+
+将团队常用的做法统一下来，新增类似需求时可以沿用：
+
+- **流程写法固定**：一份 JSON 排列节点，函数、模型、Tool、Skill 显式登记后按名称引用。
+- **传值规则固定**：前一步返回值交给后一步；需要模型提交结构体时声明 `Output[T]()`。
+- **接入方式固定**：复用已有网关和 Gin 业务函数，通过 SDK Handler 接入 HTTP、MQ、Cron，执行事件交给同一个 TraceWriter。
+
+直接用 Eino 也能简洁完成一次模型调用。Luban 的价值是提供这套可复用的约定，让业务少做重复装配和选型；同时接受顺序 flow 等边界。[运行同一个通话摘要，对照两边完整代码](docs/Eino与Luban对照.md)。
+
+## 看见每一步执行
+
+业务实现可选的 `TraceWriter`，把执行事件写入自己的日志。将同一次 `runId` 的日志导入本地查看页，即可查看调用树、耗时和节点输入输出。
+
+![Luban Trace 查看页：模拟数据中的 Agent、模型、Skill 和 Tool 执行详情](docs/images/trace-demo.png)
+
+*上图来自查看页自带的模拟演示数据，用于展示包含 Tool、Skill、子 Agent 的流程；不是上方通话摘要示例的运行结果。*
+
+从源码目录在本机打开 [Trace 查看页](sdk/trace-viewer/index.html)，点击“查看演示数据”即可体验。页面在本机解析，不需要部署服务；日志可能含业务内容。[Trace 接入与查看说明](sdk/trace-viewer/README.md)。
+
+## 能力与边界
+
+| 能力 | 当前支持 |
+| --- | --- |
+| Agent 流程 | 顺序连接业务节点和 Agent 节点；外层 flow 无配置分支或回跳，Agent 内可多轮调用工具。 |
+| 模型与 Tool | 各 Agent 独立配置模型、提示词、温度和 `maxLoopCount`；使用已注册 Tool 白名单。当前不支持实时流式输出。 |
+| Skill | 注册静态正文，或由业务 `SkillBackend` 提供；Agent 按需加载。 |
+| 子 Agent | 父选择并移交一个子 Agent；子使用自己的模型、提示词、Tool、Skill。一层移交，不返回父 Agent 重写答案。 |
+| 返回值 | 默认传递模型原始字符串；声明 `Output[T]()` 后，模型通过内部 OutputTool 提交结构化结果。 |
+| Batch | 并发处理多条输入，按原下标收集结果和错误。 |
+| 跨节点数据 | `luban.Set/Get` 在一次 Run 内共享数据，普通 Tool 可读写；Batch 只读公共快照，结束后清理。 |
+| 提前结束 | flow 业务函数调用 `Stop(ctx)` 后显式 return；Tool 调用 Stop 返回执行错误。 |
+| Trace | 执行事件与本地查看页；没有远端 Trace 服务。 |
+
+适合已有 Go/Gin 业务和模型调用器，希望用统一写法组织 AI 流程的项目。当前没有跨请求暂停恢复、远端配置平台；媒体和 Tool Calling 能力取决于接入的模型与网关。
+
+## 文档与参与
+
+- [快速接入](docs/快速接入.md)：从 JSON 配置到业务入口，以及 Tool、Skill、Output、Batch、Stop 等进阶索引。
+- [Eino 与 Luban 对照](docs/Eino与Luban对照.md)：相同输入、模拟回复和 HTTP 输出，完整展示两种实现。
+- [Trace 查看页说明](sdk/trace-viewer/README.md)：日志格式、用量来源和调用树。
+- [参与开发](CONTRIBUTING.md)：开发环境、验证和贡献约定。
+
+欢迎通过 Issue 提供接入场景、最小复现和建议。在仓库根目录运行 `make check-sdk`，检查格式、依赖、测试、竞态、`go vet` 和公司包依赖边界，并校验两份示例输出。修改查看页时另运行 `node --test sdk/trace-viewer/trace-data.test.js`。

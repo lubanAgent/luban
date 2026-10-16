@@ -307,6 +307,9 @@ func (rt *Runtime) runBatchAgent(
 
 	results := make([]batchItemValue, len(batch.Items))
 	baseGinCtx := ginCtx.Copy()
+	batchData := dataFromGin(ginCtx).readonlySnapshot()
+	baseGinCtx.Set(sharedDataGinKey, batchData)
+	defer batchData.close()
 	jobs := make(chan int)
 	var workers sync.WaitGroup
 	workers.Add(concurrency)

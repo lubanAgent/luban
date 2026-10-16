@@ -30,6 +30,8 @@ func (sampleModel) Invoke(*gin.Context, luban.ModelRequest) (luban.ModelResponse
 }
 
 func TestPublicTypesAreUsableFromExternalPackage(t *testing.T) {
+	var _ func(*gin.Context, string, any) error = luban.Set
+	var _ func(*gin.Context, string) (any, bool) = luban.Get
 	maxLoops := 4
 	config := luban.Config{
 		Agents: map[string]luban.AgentConfig{

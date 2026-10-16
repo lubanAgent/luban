@@ -1,0 +1,14 @@
+{
+  "callSummary": {
+    "description": "通话摘要演示",
+    "flow": [
+      { "func": "PrepareCall", "description": "解析通话文本" },
+      {
+        "modelName": "demo",
+        "systemPrompt": "用一句话总结通话中的诉求和后续安排。",
+        "description": "生成通话摘要"
+      },
+      { "func": "BuildResult", "description": "整理返回结果" }
+    ]
+  }
+}

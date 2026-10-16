@@ -49,7 +49,11 @@ func (t *einoToolAdapter) InvokableRun(ctx context.Context, arguments string, _ 
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			output = ""
-			err = fmt.Errorf("luban: Tool %q panicked: %v", toolName, recovered)
+			if panicErr, ok := recovered.(error); ok {
+				err = fmt.Errorf("luban: Tool %q panicked: %w", toolName, panicErr)
+			} else {
+				err = fmt.Errorf("luban: Tool %q panicked: %v", toolName, recovered)
+			}
 		}
 	}()
 

@@ -2,6 +2,7 @@ package eino
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/cloudwego/eino/adk"
@@ -9,8 +10,8 @@ import (
 	internaltrace "github.com/lubanAgent/luban/sdk/internal/trace"
 )
 
-// traceToolMiddleware observes the actual Eino tool execution, including
-// native Skill loading and OutputTool. It never executes a tool a second time.
+// traceToolMiddleware observes actual Eino tool execution and enforces its
+// callback boundary, including native Skill loading and OutputTool.
 type traceToolMiddleware struct {
 	*adk.BaseChatModelAgentMiddleware
 	agentName string
@@ -29,11 +30,33 @@ func (m *traceToolMiddleware) WrapInvokableToolCall(_ context.Context, endpoint 
 			map[string]any{"callId": tc.CallID, "arguments": arguments})
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				span.End(nil, "", fmt.Errorf("tool panicked: %v", recovered))
-				panic(recovered)
+				out = ""
+				if panicErr, ok := recovered.(error); ok {
+					err = fmt.Errorf("luban: Tool %q panicked: %w", tc.Name, panicErr)
+				} else {
+					err = fmt.Errorf("luban: Tool %q panicked: %v", tc.Name, recovered)
+				}
 			}
 			span.End(out, "", err)
 		}()
-		return endpoint(ctx, arguments, options...)
+		ginCtx, err := GinContextFrom(ctx)
+		if err != nil {
+			return "", err
+		}
+		toolGinCtx := ginCtx.Copy()
+		guard := newToolCallGuard(toolGinCtx, tc.Name)
+		defer guard.active.Store(false)
+		ctx, err = WithGinContext(ctx, toolGinCtx)
+		if err != nil {
+			return "", err
+		}
+		out, err = endpoint(ctx, arguments, options...)
+		if guard.rejected.Load() {
+			out = ""
+			if !errors.Is(err, guard.err) {
+				err = errors.Join(err, guard.err)
+			}
+		}
+		return out, err
 	}, nil
 }

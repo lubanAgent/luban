@@ -5,7 +5,7 @@
 ## 本地环境
 
 - Go 版本以 [`sdk/go.mod`](sdk/go.mod) 为准；SDK 独立模块，无须公司内部依赖或模型密钥。
-- 在仓库根目录运行 `make check-sdk`，覆盖格式、依赖、单元与竞态测试、`go vet`、公司包依赖边界。
+- 在仓库根目录运行 `make check-sdk`，覆盖格式、依赖、单元与竞态测试、`go vet`、公司包依赖边界，并核验 Luban 与原生 Eino 的通话摘要示例输出。
 - 修改 Trace 查看页时运行 `node --test sdk/trace-viewer/trace-data.test.js`，用不含真实客户数据的日志检查展示。
 
 ## 变更约定

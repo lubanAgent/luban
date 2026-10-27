@@ -1,4 +1,13 @@
-.PHONY: check-sdk
+.PHONY: check
 
-check-sdk:
-	./scripts/check-sdk.sh
+check:
+	@unformatted="$$(gofmt -l $$(find . -name '*.go' -type f))"; \
+	if [ -n "$$unformatted" ]; then \
+		printf '%s\n' "Unformatted Go files:" "$$unformatted" >&2; \
+		exit 1; \
+	fi
+	go mod tidy -diff
+	go test ./...
+	go test -race ./...
+	go vet ./...
+	go build -trimpath ./...

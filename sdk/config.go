@@ -33,6 +33,7 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 // AgentConfig describes an Agent and its ordered flow.
 type AgentConfig struct {
 	Description string       `json:"description,omitempty" yaml:"description,omitempty"`
+	ProjectKey  string       `json:"projectKey,omitempty" yaml:"projectKey,omitempty"`
 	Flow        []NodeConfig `json:"flow" yaml:"flow"`
 }
 

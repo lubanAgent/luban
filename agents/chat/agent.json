@@ -1,0 +1,8 @@
+{
+  "flow": [
+    {
+      "modelName": "deepseek-v4-flash",
+      "systemPrompt": "你是一个中文助手。直接回答用户的问题，表达清楚、简洁。"
+    }
+  ]
+}

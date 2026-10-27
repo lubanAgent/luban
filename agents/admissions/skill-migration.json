@@ -1,0 +1,259 @@
+{
+  "sourceCommit": "4c3f7b43fe39a00346680d47f8f91850bb736f8a",
+  "skills": [
+    {
+      "name": "requirementClarify",
+      "source": "main.md",
+      "sourceSHA256": "d5ac237e83f0b8240989d6b613df55ec971ae2480748842bb2d1307db2af6244",
+      "skillSHA256": "6aee67cf72867fa48536f79984fbf57a56296a5ff6ce99eea8092975336c8fc0",
+      "bytes": 16137,
+      "changes": [
+        {
+          "kind": "section",
+          "reason": "P16: three old tools replaced by complete requirements editing and OutputTool",
+          "old": "## 9. 工具\n\n只有三个,**独占一轮**(调用时不写自由文本):\n\n### 9.1 emit_summary\n信息齐时一次性产出三段 brief。\n\n```jsonc\n{\n  \"stage1_brief\": \"<留资 + 资格>\",\n  \"stage2_brief\": \"<成绩 + 算分 + 校验>\",\n  \"stage3_brief\": \"<分流 + 推荐 + 展示>\"\n}\n```\n\n### 9.2 update_brief\n补充修改某一段 brief(信息合并)。\n\n```jsonc\n{\n  \"stage\": \"stage1_brief | stage2_brief | stage3_brief\",\n  \"updated_content\": \"<整段替换后的 brief>\"\n}\n```\n\n### 9.3 request_more_info\n仅当 §7 命中时使用,把真缺口转成一句对运营的自然追问。\n\n---\n\n",
+          "new": "## 9. 需求编辑与结论\n\n用 editStrategyDraft.requirements 完整替换三段需求，未修改的内容也必须保留。\n包括 stage1Brief/stage2Brief/stage3Brief、openQuestions、explicitRules（text +\nsourceMessageSeq）和 coveredMessageSeq。旧单段 update_brief 不再存在。\n信息不足时提交 reply，并在 reply 中最多追问两个必要问题；信息齐全时先检查，\n再提交 readyToConfirm 和有效 checkId，不能替人点击确认。"
+        },
+        {
+          "kind": "section",
+          "reason": "replace obsolete multi-agent execution contract",
+          "old": "## 13. 跨 Agent 契约段\n\n**你的产出会被下游这样消费**:\n\n| 下游 | 消费 |\n|---|---|\n| S1 | 读 stage1_brief → 产出 `intake.fields[]` + `eligibility` |\n| S2 | 读 stage2_brief + S1 字段 → 产出 `scoreInput` + `scoreCalc[]`(named array) |\n| S3 | 读 stage3_brief + S1/S2 + config 数据 → 产出 `decisionTree` + `pipelineInput.paths` |\n| ReportDisplayBuilder | 从 S3 decisionTree 自动推 reportDisplay |\n\n下游已经各自负责字段映射、DSL 语法、字段落点这些**实现细节**。\n\n**你只产自然语言 brief,不产 JSON / fieldKey / DSL**。\nbrief 写得越顺、越完整、越无歧义,下游越准。\n",
+          "new": "## 13. 同一草稿的部分契约\n\nstage1Brief 对应 form 的 intake/eligibility；stage2Brief 对应 scoring 的\nscoreInput/scoreCalc；stage3Brief 对应 recommendation 与 display。\n需求卡片保持自然语言，不把 JSON/DSL 细节混入用户的完整 brief。\n同一 Agent 在 generate 任务中按领域知识编辑各部分；不存在下游子 Agent。"
+        },
+        {
+          "kind": "replace",
+          "reason": "replace old finalization tool",
+          "count": 6,
+          "old": "emit_summary",
+          "new": "检查后提交 readyToConfirm"
+        },
+        {
+          "kind": "replace",
+          "reason": "replace old partial edit tool",
+          "count": 3,
+          "old": "update_brief",
+          "new": "完整替换 requirements"
+        },
+        {
+          "kind": "replace",
+          "reason": "remove nonexistent downstream executor",
+          "count": 1,
+          "old": "下游 S3 / Validator 解决",
+          "new": "通过真实目录和当前草稿检查解决"
+        },
+        {
+          "kind": "replace",
+          "reason": "P15: distinguish score and ranking direction",
+          "count": 3,
+          "old": "diff = schoolMetric - userMetric",
+          "new": "diff：分数为 schoolScore - userScore，排名为 userRank - schoolRank"
+        },
+        {
+          "kind": "replace",
+          "reason": "single Agent domain title",
+          "count": 1,
+          "old": "# Main · 需求翻译 Agent",
+          "new": "# 需求沟通与完整需求卡片"
+        },
+        {
+          "kind": "replace",
+          "reason": "remove downstream model identity",
+          "count": 1,
+          "old": "把运营的口语化需求翻译成下游 Agent 能消费的清晰 brief",
+          "new": "把运营的口语化需求翻译成同一草稿可消费的完整清晰 brief"
+        }
+      ]
+    },
+    {
+      "name": "formAndEligibility",
+      "source": "s1.md",
+      "sourceSHA256": "d14b787d5e3cd34c2ef3b98d82ddb0df5f2a605787b8c297fdf1123a8c469098",
+      "skillSHA256": "0247ab4d37ca2d6ecdc876123fbea4c9925f36b1cc7143edb0ca7cb424cf6f04",
+      "bytes": 13010,
+      "changes": [
+        {
+          "kind": "replace",
+          "reason": "replace standalone JSON protocol",
+          "count": 1,
+          "old": "- 你不与任何人对话;只输出一个 JSON 对象",
+          "new": "- 生成阶段通过 editStrategyDraft.form 提交完整 form，不另写最终裸 JSON"
+        },
+        {
+          "kind": "replace",
+          "reason": "replace no-tool protocol",
+          "count": 1,
+          "old": "## 3. 输出契约 — 直接 JSON,无工具调用",
+          "new": "## 3. form 领域结构（通过 editStrategyDraft 提交）"
+        },
+        {
+          "kind": "replace",
+          "reason": "P01: consistent strategy field; legacy submission mapping remains a consumer gate",
+          "count": 1,
+          "old": "`childrenName`",
+          "new": "`student_name`"
+        },
+        {
+          "kind": "section",
+          "reason": "replace nonexistent wrapper and fixed subtask retry",
+          "old": "## 11. 失败处理(Wrapper 参考)\n\n| 失败类型 | 处理 |\n|---|---|\n| JSON 校验失败 | 回传错误让 AI 修正,最多 2 次 |\n| fieldKey 非 snake_case | 回传错误清单 |\n| 违反 §5.1 强制命名(姓名/年级/初中/行政区) | 回传 §5.1 表 + 出错字段 |\n| condition.field 不在 intake.fields | 回传 + 已声明 key 列表 |\n| condition.op 不在 11 原语 | 回传原语表 |\n| AI 自由文本回复 / markdown 围栏 | Wrapper strip 围栏;仍失败则重试 |\n| 连续 2 次失败 | Subtask 标 failed,task 整体 failed |\n",
+          "new": "## 11. 失败与修复\n\n字段类型、未知引用、命名冲突和不支持的条件由 checkStrategyDraft 返回 issues。\n模型按当前 revision 修改 form 后再次检查；没有 Wrapper 自动修复、固定两轮修复\n或旧 Subtask。超限与基础设施错误按当前 Agent/业务任务规则失败。"
+        },
+        {
+          "kind": "replace",
+          "reason": "single Agent domain title",
+          "count": 1,
+          "old": "# S1 · 留资 + 资格校验 配置产出器",
+          "new": "# 留资与资格配置"
+        }
+      ]
+    },
+    {
+      "name": "scoreCalculation",
+      "source": "s2.md",
+      "sourceSHA256": "be0a1172776153276ce347de7495de867de0994c9976730ee5d1d6f3697be2bb",
+      "skillSHA256": "8d1812965cacc8645774b3b291abe923269e884224ac36ae1cdc666fb8483ec2",
+      "bytes": 20996,
+      "changes": [
+        {
+          "kind": "section",
+          "reason": "replace unconditional standalone JSON response",
+          "old": "### 3.2 不输出其他任何结构\n\n不输出 missing_fields、不输出错误态、不输出解释文字。拿到 brief 就产出。\n\n---\n\n",
+          "new": "### 3.2 当前提交方式\n\n用 editStrategyDraft.scoring 提交完整 scoreInput/scoreCalc。\n无法表达时保留明确缺口；不得删除规则或用零值假装完成。"
+        },
+        {
+          "kind": "replace",
+          "reason": "P03: do not invent bounds",
+          "count": 1,
+          "old": "未知侧用 0 或 999 中最合理的",
+          "new": "未知侧列为必要缺口并询问运营，不能猜 0/999"
+        },
+        {
+          "kind": "replace",
+          "reason": "P03: do not invent bounds",
+          "count": 1,
+          "old": "brief 完全没提范围 → min=0, max=999",
+          "new": "brief 完全没提范围 → 保留缺口，补齐明确范围后才能检查通过"
+        },
+        {
+          "kind": "replace",
+          "reason": "P07: remove cross-field rule not requested in the example",
+          "count": 1,
+          "old": "\"validation\": [\n      {\n        \"type\": \"toast\",\n        \"condition\": {\"op\": \"gte\", \"field\": \"m1\", \"value\": \"m3\"},\n        \"message\": \"m1 不能大于 m3\"\n      }\n    ]",
+          "new": "\"validation\": []"
+        },
+        {
+          "kind": "section",
+          "reason": "replace wrapper; P04/P05 consumer verification gate",
+          "old": "## 12. 失败处理（Wrapper 参考）\n\n| 失败类型 | 处理 |\n|---|---|\n| JSON 校验失败 | 回传错误，重试最多 2 次 |\n| scoreCalc 不是数组 | 回传\"必须是数组\" |\n| outputKey ≠ \"user_score\" | 回传锁死规则 |\n| name 重复 | 回传重复清单 |\n| inputs.field 不在 scoreInput.fields | 回传白名单 |\n| weight 混用 | 回传\"全写或全省略\" |\n| type ≠ weighted | 回传\"仅支持 weighted\" |\n| 多公式缺 branchSpec | 回传 §7 规则 |\n| branchSpec key 不在 stage1 fields | 回传 stage1 field key 列表 |\n| branchSpec value 不在取值集合内 | 回传对应取值全集 |\n| branchSpec 取值有交集或不覆盖全集 | 回传具体冲突/缺失 |\n| 单公式带了 branchSpec | 回传\"单公式不写 branchSpec\" |\n| 自由文本 / markdown 围栏 | strip 围栏，仍失败则重试 |\n| 连续 2 次失败 | subtask 标 failed |\n",
+          "new": "## 12. 当前检查与修复\n\ncheckStrategyDraft 校验公式、完整分支组合、字段引用及可执行边界。\n修改后旧 checkId 作废。没有 Wrapper 去围栏、固定两轮重试或 S2 子任务。\n平均、近似 0.33、小数 lookup 和跨字段 validation 未经学生页验证不能通过；\n完整例子仍保留为领域知识，遇到不支持的形态明确报告，不改成错误的整数公式。"
+        },
+        {
+          "kind": "replace",
+          "reason": "single Agent domain title",
+          "count": 1,
+          "old": "# S2 · 成绩输入 + 算分公式 配置产出器",
+          "new": "# 成绩输入与算分公式"
+        }
+      ]
+    },
+    {
+      "name": "schoolRecommendation",
+      "source": "school_picker.md",
+      "sourceSHA256": "dd00c73081f2a3464e8fc475b4f733a74bf1608f2099be4306540254d6a32513",
+      "skillSHA256": "502f53e344ecbe9c0de651d77d3579c6def1436f9f71f3d7f5f68e9cae1f5ed5",
+      "bytes": 12351,
+      "changes": [
+        {
+          "kind": "replace",
+          "reason": "remove separate model identity",
+          "count": 1,
+          "old": "# SCHOOL_PICKER Agent",
+          "new": "# 学校推荐规则与确定性计算"
+        },
+        {
+          "kind": "replace",
+          "reason": "replace standalone no-tool protocol",
+          "count": 1,
+          "old": "- 你只输出 JSON，**不允许任何代码、tool_call、自由文本、自我解释**；",
+          "new": "- 通过 editStrategyDraft.recommendation 编辑路径；Go 计算学校，模型不输出代码或逐分结果；"
+        },
+        {
+          "kind": "replace",
+          "reason": "P09/P10: unresolved schools fail visibly",
+          "count": 1,
+          "old": "- 输入数据不足以产出合法结果时，把异常学校丢到 `stats.invalid_school_names`，并继续输出尽可能多的有效结果。",
+          "new": "- 学校不存在或同名无法唯一解析时报告问题，不能静默丢弃后声称成功。"
+        },
+        {
+          "kind": "replace",
+          "reason": "move old output shape into reference example",
+          "count": 1,
+          "old": "## 输出契约（强约束 · 只能输出这一个 JSON）",
+          "new": "## 历史计算结果示例（用于理解统计，不由模型提交）"
+        },
+        {
+          "kind": "replace",
+          "reason": "P15: no probability fallback",
+          "count": 1,
+          "old": "`match_key=probability` 时按 path_config 的语义处理（如无明确定义，按 score 处理）。",
+          "new": "`match_key=probability` 尚无已验证算法，返回 unsupported_rule，禁止按 score 回退。"
+        },
+        {
+          "kind": "replace",
+          "reason": "replace standalone final output",
+          "count": 1,
+          "old": "只输出一个 JSON 对象，**外层不要任何 markdown 围栏、不要任何注释**。",
+          "new": "实际执行只编辑路径规则；最终用 __runtime_output 提交本轮结论。"
+        }
+      ]
+    },
+    {
+      "name": "resultDisplay",
+      "source": "s3.md",
+      "sourceSHA256": "3f725106b74fc637f38e617275f949c695192985aba86acdc46e8345a6b5156b",
+      "skillSHA256": "24a9507dc57c76f6244a1c29e04b2edb94b8ff59d6bbc98f979fd8b201b8bcfc",
+      "bytes": 37991,
+      "changes": [
+        {
+          "kind": "replace",
+          "reason": "replace standalone JSON/no-tool protocol",
+          "count": 1,
+          "old": "**硬约束**：整条回复是一个合法 JSON 对象。不要 markdown 围栏、不要解释文字、不要 tool_call。",
+          "new": "下列为领域结构示例。实际通过 editStrategyDraft.recommendation 提交 decisionTree/paths；不提交裸 JSON，不调用旧 S3 子模型。"
+        },
+        {
+          "kind": "section",
+          "reason": "replace multi-agent fanout; preserve all long examples",
+          "old": "## 15. 跨 Agent 契约\n\n### 15.1 我消费的上游\n\n| 上游 | 字段 | 用法 |\n|---|---|---|\n| S1 | intake.fields[].key | judge.fieldRef 白名单 |\n| S1 | 字段取值集合 | judge.branches[].values 来源（见下表） |\n| S2 | scoreCalc[].name | scoreCalcRef 候选 |\n| S2 | scoreCalc[].branchSpec | scoreCalcRef 查找依据（§10） |\n| config_data_brief | districts / types / categories / tags / score_columns | schoolScope value 归属 + scoreColumn 候选 |\n\n**S1 字段形态 → branches.values 取值来源**：\n\n| S1 字段形态 | values 来源 |\n|---|---|\n| type=enum, optionsEnum=[{id},...] | optionsEnum[].id |\n| type=select, options=[...] | options[] |\n| type=select, dataRef=\"X\" | config_data_brief 中对应列表 |\n| type=number / text / searchSelect | 禁止用作 judge.fieldRef |\n\n### 15.2 下游消费我的产出\n\n| 下游 | 消费规则 |\n|---|---|\n| SchoolPicker | 按 path 跑 fanout：match 模式用 tiers/schoolScope/scoreColumn，fixed 模式用 tiers 的 fixedSchools |\n| finalize | 按 recommendNodeId 落 lookup table |\n| 前端 | 渲染 decisionTree；按 calc_score.scoreCalcRef 在 S2 数组里找公式算 user_score |\n\n---\n\n",
+          "new": "## 15. 同一草稿与确定性计算\n\nform 的真实字段和 scoring 的完整公式是 decisionTree 的引用来源。\n旧 pipelineInput.paths 映射为 recommendation.paths。Go 按当前已检查的路径\n与完整学校快照计算，不再 fanout 调用 SchoolPicker 模型。\ndisplay.sections 保持原板块名与数组顺序，quota 不伪造学校 lookup。\n以下完整 A/B/C 例子保留领域含义，按当前 edit 工具外层提交。"
+        },
+        {
+          "kind": "replace",
+          "reason": "P14: remove duplicated heading only",
+          "count": 1,
+          "old": "## 16. 合成 Few-shot\n\n## 16. 合成 Few-shot",
+          "new": "## 16. 合成 Few-shot"
+        },
+        {
+          "kind": "replace",
+          "reason": "single Agent domain title",
+          "count": 1,
+          "old": "# S3 · 决策树 + 推荐路径配置产出器",
+          "new": "# 决策树、推荐路径与展示"
+        }
+      ]
+    },
+    {
+      "name": "strategyCheck",
+      "source": "Main/S1/S2/S3/SchoolPicker 检查章节及本轮 Agent 一致性契约",
+      "skillSHA256": "172cf296f85c33f2cd0e45ae465e57be39a5eadd2c2859098a3edb6d5568f1c4",
+      "bytes": 3074,
+      "changes": [
+        {
+          "kind": "manual",
+          "reason": "Track the hand-authored cross-domain review Skill in the same manifest."
+        }
+      ]
+    }
+  ]
+}

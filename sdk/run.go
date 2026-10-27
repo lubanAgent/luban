@@ -115,8 +115,8 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 			} else {
 				panicErr = fmt.Errorf("luban: appKey %q %s panicked: %v", appKey, activeNode, recovered)
 			}
-			if ctx != nil && ctx.Request != nil && ctx.Request.Context() != nil {
-				if cancelErr := ctx.Request.Context().Err(); cancelErr != nil {
+			if ctx != nil {
+				if cancelErr := Context(ctx).Err(); cancelErr != nil {
 					panicErr = errors.Join(panicErr, cancelErr)
 				}
 			}
@@ -128,6 +128,11 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 		return nil, fmt.Errorf("luban: Gin context must not be nil")
 	}
 	data = &runData{values: make(map[string]any)}
+	if rt != nil {
+		data.databases = rt.databases
+		data.resources = rt.resources
+		data.skills = rt.skillsFor(appKey)
+	}
 	ctx.Set(sharedDataGinKey, data)
 	runIDBytes := make([]byte, 16)
 	if _, err := rand.Read(runIDBytes); err != nil {
@@ -164,7 +169,7 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 	if err := stdCtx.Err(); err != nil {
 		return nil, err
 	}
-	if err := rt.validateFlowSignatures(snapshot.config.Flow); err != nil {
+	if err := rt.validateAgentFlowSignatures(appKey, snapshot.config.Flow); err != nil {
 		return nil, fmt.Errorf("luban: appKey %q flow: %w", appKey, err)
 	}
 	startIndex := 0
@@ -305,12 +310,17 @@ func traceNodeValue(value nodeValue) any {
 }
 
 func (rt *Runtime) validateFlowSignatures(flow []NodeConfig) error {
+	return rt.validateAgentFlowSignatures("", flow)
+}
+
+func (rt *Runtime) validateAgentFlowSignatures(appKey string, flow []NodeConfig) error {
+	functions := rt.functionsFor(appKey)
 	for index := 0; index+1 < len(flow); index++ {
 		current, next := flow[index], flow[index+1]
 		if current.Func == "" {
 			continue
 		}
-		out := rt.funcs[current.Func]
+		out := functions[current.Func]
 		if next.Func == "" {
 			if !out.HasOutput {
 				return fmt.Errorf("flow[%d] function %q has no output for Agent input at flow[%d]",
@@ -325,7 +335,7 @@ func (rt *Runtime) validateFlowSignatures(flow []NodeConfig) error {
 			}
 			continue
 		}
-		in := rt.funcs[next.Func]
+		in := functions[next.Func]
 		if !in.HasInput {
 			continue
 		}
@@ -348,10 +358,7 @@ func contextForGin(ctx *gin.Context) (context.Context, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("luban: Gin context must not be nil")
 	}
-	parent := context.Background()
-	if ctx.Request != nil && ctx.Request.Context() != nil {
-		parent = ctx.Request.Context()
-	}
+	parent := Context(ctx)
 	return internaleino.WithGinContext(parent, ctx)
 }
 
@@ -378,7 +385,7 @@ func (rt *Runtime) callFlowFunction(state *runState, appKey string, index int, k
 }
 
 func (rt *Runtime) callFunction(appKey string, index int, key string, ctx *gin.Context, incoming nodeValue) (out nodeValue, err error) {
-	info, exists := rt.funcs[key]
+	info, exists := rt.functionsFor(appKey)[key]
 	if !exists {
 		return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] function %q was not registered", appKey, index, key)
 	}

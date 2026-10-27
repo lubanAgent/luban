@@ -176,7 +176,7 @@ func toolInfoFor(name, description string, inputType reflect.Type) (info *schema
 	}
 	reflector := &jsonschema.Reflector{
 		Anonymous:      true,
-		DoNotReference: true,
+		DoNotReference: !recursiveSchemaType(inputType, make(map[reflect.Type]bool), make(map[reflect.Type]bool)),
 	}
 	jsonSchema := reflector.ReflectFromType(inputType)
 	jsonSchema.Version = ""
@@ -185,6 +185,30 @@ func toolInfoFor(name, description string, inputType reflect.Type) (info *schema
 		Desc:        description,
 		ParamsOneOf: schema.NewParamsOneOfByJSONSchema(jsonSchema),
 	}, nil
+}
+
+// Recursive DTOs require $defs/$ref; expanding them inline never terminates.
+func recursiveSchemaType(t reflect.Type, visiting, completed map[reflect.Type]bool) bool {
+	if visiting[t] {
+		return true
+	}
+	if completed[t] {
+		return false
+	}
+	visiting[t] = true
+	defer func() { delete(visiting, t); completed[t] = true }()
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		return recursiveSchemaType(t.Elem(), visiting, completed)
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if field.IsExported() && field.Tag.Get("json") != "-" && recursiveSchemaType(field.Type, visiting, completed) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func decodeToolInput(inputType reflect.Type, arguments string) (any, error) {

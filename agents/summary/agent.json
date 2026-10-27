@@ -1,0 +1,6 @@
+{
+  "description": "生成摘要",
+  "flow": [
+    {"modelName": "deepseek-v4-flash", "systemPrompt": "用简洁的中文总结用户提供的内容，保留主要结论和待办。"}
+  ]
+}

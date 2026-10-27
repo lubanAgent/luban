@@ -8,15 +8,15 @@ import (
 // Request contains the messages for one Agent invocation and an optional
 // typed result contract.
 type Request struct {
-	Messages []Message
-	Output   *OutputSpec
+	Messages []Message   `json:"messages"`
+	Output   *OutputSpec `json:"-"`
 }
 
 // Message is one user or assistant message supplied to an Agent. The configured
 // systemPrompt supplies the system role.
 type Message struct {
-	Role    Role
-	Content []Part
+	Role    Role   `json:"role"`
+	Content []Part `json:"content"`
 }
 
 // Role identifies a conversation message role.
@@ -29,9 +29,9 @@ const (
 
 // Part contains text or a URL-backed media item.
 type Part struct {
-	Type PartType
-	Text string
-	URL  string
+	Type PartType `json:"type"`
+	Text string   `json:"text,omitempty"`
+	URL  string   `json:"url,omitempty"`
 }
 
 // PartType identifies the content carried by a Part.

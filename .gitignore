@@ -1,0 +1,17 @@
+# 本地运行产物
+/log/
+/luban
+*.test
+coverage.out
+.DS_Store
+__pycache__/
+*.pyc
+
+# 本地凭据和临时数据库
+.env
+.env.*
+!.env.example
+conf/*.local.*
+*.db
+*.sqlite
+*.sqlite3

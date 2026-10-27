@@ -3,15 +3,31 @@ package luban
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
+
+	"gorm.io/gorm"
 )
 
 // Options configures a Runtime. Config and the Models map are copied by New;
 // ModelInvoker implementations themselves remain owned by the caller.
 type Options struct {
-	Config        Config
-	Models        map[string]ModelInvoker
+	Config   Config
+	Models   map[string]ModelInvoker
+	Projects map[string][]ModelConnection
+	// ProjectModels overrides selected models with host-owned invokers scoped
+	// to a project. This lets a company reuse an existing model gateway client
+	// without making the SDK depend on that client's package.
+	ProjectModels map[string]map[string]ModelInvoker
+	// ProjectDefaults supplies one service-owned fallback invoker per project.
+	ProjectDefaults map[string]ModelInvoker
+	HTTPDoer        HTTPDoer
+	Databases       map[string]*gorm.DB
+	// Resources holds arbitrary business clients. New copies the map, not the
+	// clients; callers own their concurrency safety and lifecycle.
+	Resources     map[string]any
+	Skills        map[string]map[string]Skill
 	SkillBackends map[string]SkillBackend
 	TraceWriter   TraceWriter
 }
@@ -19,9 +35,15 @@ type Options struct {
 // Runtime holds immutable business registrations and configuration snapshots.
 // A Runtime is safe for concurrent use after Register succeeds.
 type Runtime struct {
-	config      Config
-	models      map[string]ModelInvoker
-	traceWriter TraceWriter
+	config          Config
+	models          map[string]ModelInvoker
+	projects        map[string][]ModelConnection
+	projectRoutes   map[string]projectModelRoute
+	projectModels   map[string]map[string]ModelInvoker
+	projectDefaults map[string]ModelInvoker
+	databases       map[string]*gorm.DB
+	resources       map[string]any
+	traceWriter     TraceWriter
 
 	registerMu      sync.Mutex
 	registerAttempt bool
@@ -30,6 +52,7 @@ type Runtime struct {
 	tools           map[string]registeredTool
 	skills          map[string]Skill
 	skillBackends   map[string]SkillBackend
+	agents          map[string]agentRegistry
 
 	configCache *configCache
 }
@@ -43,6 +66,10 @@ type registeredTool struct {
 // New creates a Runtime and copies the supplied configuration and model map.
 // Business functions, Tools, and Skills are added with Register.
 func New(options Options) (*Runtime, error) {
+	resources, err := copyResources(options.Resources)
+	if err != nil {
+		return nil, err
+	}
 	models := make(map[string]ModelInvoker, len(options.Models))
 	for key, model := range options.Models {
 		if key == "" {
@@ -52,6 +79,43 @@ func New(options Options) (*Runtime, error) {
 			return nil, fmt.Errorf("luban: model %q is nil", key)
 		}
 		models[key] = model
+	}
+	projects, routes, err := buildProjectRoutes(options.Projects, options.HTTPDoer)
+	if err != nil {
+		return nil, err
+	}
+	projectModels := make(map[string]map[string]ModelInvoker, len(options.ProjectModels))
+	for project, configuredModels := range options.ProjectModels {
+		if strings.TrimSpace(project) == "" || len(configuredModels) == 0 {
+			return nil, fmt.Errorf("luban: custom model project %q must have a name and at least one model", project)
+		}
+		projectModels[project] = make(map[string]ModelInvoker, len(configuredModels))
+		for modelName, model := range configuredModels {
+			if strings.TrimSpace(modelName) == "" {
+				return nil, fmt.Errorf("luban: custom model project %q has an empty model name", project)
+			}
+			if isNilInterface(model) {
+				return nil, fmt.Errorf("luban: custom model project %q model %q is nil", project, modelName)
+			}
+			projectModels[project][modelName] = model
+		}
+	}
+	projectDefaults := make(map[string]ModelInvoker, len(options.ProjectDefaults))
+	for project, model := range options.ProjectDefaults {
+		if strings.TrimSpace(project) == "" || isNilInterface(model) {
+			return nil, fmt.Errorf("luban: project %q requires a non-nil default model", project)
+		}
+		projectDefaults[project] = model
+	}
+	databases := make(map[string]*gorm.DB, len(options.Databases))
+	for name, db := range options.Databases {
+		if name == "" {
+			return nil, fmt.Errorf("luban: database name must not be empty")
+		}
+		if db == nil {
+			return nil, fmt.Errorf("luban: database %q is nil", name)
+		}
+		databases[name] = db
 	}
 
 	skillBackends := make(map[string]SkillBackend, len(options.SkillBackends))
@@ -64,16 +128,27 @@ func New(options Options) (*Runtime, error) {
 		}
 		skillBackends[key] = backend
 	}
+	agents, err := registeredAgentSnapshot(options.Skills)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Runtime{
-		config:        cloneConfig(options.Config),
-		models:        models,
-		traceWriter:   options.TraceWriter,
-		funcs:         make(map[string]registeredFunction),
-		tools:         make(map[string]registeredTool),
-		skills:        make(map[string]Skill),
-		skillBackends: skillBackends,
-		configCache:   newConfigCache(),
+		config:          cloneConfig(options.Config),
+		models:          models,
+		projects:        projects,
+		projectRoutes:   routes,
+		projectModels:   projectModels,
+		projectDefaults: projectDefaults,
+		databases:       databases,
+		resources:       resources,
+		traceWriter:     options.TraceWriter,
+		funcs:           make(map[string]registeredFunction),
+		tools:           make(map[string]registeredTool),
+		skills:          make(map[string]Skill),
+		skillBackends:   skillBackends,
+		agents:          agents,
+		configCache:     newConfigCache(),
 	}, nil
 }
 

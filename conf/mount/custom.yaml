@@ -1,0 +1,5 @@
+ips:
+  domain: ${LUBAN_IPS_DOMAIN}
+  app_id: ${LUBAN_IPS_APP_ID}
+  app_secret: ${LUBAN_IPS_APP_SECRET}
+  server_name: luban

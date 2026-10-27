@@ -53,7 +53,22 @@ func (rt *Runtime) loadSnapshot(appKey string) (agentSnapshot, error) {
 }
 
 func (rt *Runtime) validateAndSnapshot(appKey string, agent AgentConfig) (agentSnapshot, error) {
-	validated, err := internalconfig.ValidateAndSnapshot(appKey, toInternalAgentConfig(agent), rt.internalConfigRegistry())
+	registry := rt.internalConfigRegistry(appKey)
+	if rt.hasProjectModelRouting() {
+		registry.Models = make(map[string]struct{})
+	}
+	for _, node := range agent.Flow {
+		for _, name := range append([]string{node.ModelName}, childModelNames(node.SubAgents)...) {
+			if name == "" {
+				continue
+			}
+			if _, err := rt.modelFor(agent.ProjectKey, name); err != nil {
+				continue
+			}
+			registry.Models[name] = struct{}{}
+		}
+	}
+	validated, err := internalconfig.ValidateAndSnapshot(appKey, toInternalAgentConfig(agent), registry)
 	if err != nil {
 		return agentSnapshot{}, err
 	}
@@ -71,7 +86,15 @@ func (rt *Runtime) validateAndSnapshot(appKey string, agent AgentConfig) (agentS
 	return snapshot, nil
 }
 
-func (rt *Runtime) internalConfigRegistry() internalconfig.Registry {
+func childModelNames(children []SubAgentConfig) []string {
+	names := make([]string, len(children))
+	for i, child := range children {
+		names[i] = child.ModelName
+	}
+	return names
+}
+
+func (rt *Runtime) internalConfigRegistry(appKey string) internalconfig.Registry {
 	registry := internalconfig.Registry{
 		Functions:     make(map[string]struct{}, len(rt.funcs)),
 		Models:        make(map[string]struct{}, len(rt.models)),
@@ -79,16 +102,25 @@ func (rt *Runtime) internalConfigRegistry() internalconfig.Registry {
 		Skills:        make(map[string]internalconfig.Skill, len(rt.skills)),
 		SkillBackends: make(map[string]struct{}, len(rt.skillBackends)),
 	}
-	for name := range rt.funcs {
+	for name := range rt.functionsFor(appKey) {
 		registry.Functions[name] = struct{}{}
 	}
 	for name := range rt.models {
 		registry.Models[name] = struct{}{}
 	}
-	for name := range rt.tools {
+	projectKey := rt.config.Agents[appKey].ProjectKey
+	if projectKey == "" {
+		if projects := rt.projectKeys(); len(projects) == 1 {
+			projectKey = projects[0]
+		}
+	}
+	for name := range rt.projectModels[projectKey] {
+		registry.Models[name] = struct{}{}
+	}
+	for name := range rt.toolsFor(appKey) {
 		registry.Tools[name] = struct{}{}
 	}
-	for name, skill := range rt.skills {
+	for name, skill := range rt.skillsFor(appKey) {
 		registry.Skills[name] = internalconfig.Skill{
 			Name:        skill.Name,
 			Description: skill.Description,
@@ -102,7 +134,7 @@ func (rt *Runtime) internalConfigRegistry() internalconfig.Registry {
 }
 
 func toInternalAgentConfig(agent AgentConfig) internalconfig.AgentConfig {
-	result := internalconfig.AgentConfig{Description: agent.Description, Flow: make([]internalconfig.NodeConfig, len(agent.Flow))}
+	result := internalconfig.AgentConfig{Description: agent.Description, ProjectKey: agent.ProjectKey, Flow: make([]internalconfig.NodeConfig, len(agent.Flow))}
 	for i, node := range agent.Flow {
 		converted := internalconfig.NodeConfig{
 			Description:  node.Description,
@@ -133,7 +165,7 @@ func toInternalAgentConfig(agent AgentConfig) internalconfig.AgentConfig {
 }
 
 func fromInternalAgentConfig(agent internalconfig.AgentConfig) AgentConfig {
-	result := AgentConfig{Description: agent.Description, Flow: make([]NodeConfig, len(agent.Flow))}
+	result := AgentConfig{Description: agent.Description, ProjectKey: agent.ProjectKey, Flow: make([]NodeConfig, len(agent.Flow))}
 	for i, node := range agent.Flow {
 		converted := NodeConfig{
 			Description:  node.Description,
@@ -172,7 +204,7 @@ func cloneConfig(src Config) Config {
 }
 
 func cloneAgentConfig(src AgentConfig) AgentConfig {
-	dst := AgentConfig{Description: src.Description, Flow: make([]NodeConfig, len(src.Flow))}
+	dst := AgentConfig{Description: src.Description, ProjectKey: src.ProjectKey, Flow: make([]NodeConfig, len(src.Flow))}
 	for i, node := range src.Flow {
 		dst.Flow[i] = cloneNodeConfig(node)
 	}

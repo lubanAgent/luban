@@ -1,0 +1,699 @@
+{
+  "version": 1,
+  "language": "zh-CN",
+  "mode": "module",
+  "modeData": {
+    "entryNodeId": "mq",
+    "outputNodeIds": [
+      "finish",
+      "result"
+    ],
+    "sourceEvidenceIds": [
+      "mqhandler",
+      "run",
+      "chain",
+      "assembly"
+    ]
+  },
+  "title": "一条消息走完鲁班 Agent：当前实现与业务接入",
+  "summary": "用 Wecombot 的 trustee Agent 贯穿启动装配、MQ 接入、顺序执行、模型工具循环、质检和收尾。",
+  "truthLadder": {
+    "analogy": "可以把 Runtime 想成接线台：业务把方法和网关插上，配置告诉它按什么顺序接线。这个说法只是帮助记忆。",
+    "technical": "每次 Run 根据 appKey 取得配置快照，临时编译 Eino Chain；函数经反射调用，Agent 节点构建 ChatModelAgent，模型请求委托业务 ModelInvoker。",
+    "caveat": "这是当前代码的能力，不等于所有业务自动零代码接入。Wecombot 的前置状态、候选动作、质检与真正发送仍由业务实现；RunFrom 是新的指定节点入口，不保存跨 Run 状态。"
+  },
+  "scenes": [
+    {
+      "id": "overview",
+      "title": "先记住四个角色",
+      "summary": "业务提供资料与动作；Luban 编排；Eino 执行 Agent；业务网关真正发送模型请求。",
+      "nodes": [
+        {
+          "id": "business",
+          "label": "业务模块",
+          "detail": "加载配置，提供取数、规则、Tool 和发送动作。",
+          "kind": "actor",
+          "evidence": [
+            "assembly",
+            "request",
+            "tools"
+          ]
+        },
+        {
+          "id": "runtime",
+          "label": "Luban Runtime",
+          "detail": "按 appKey 找配置，接线、传值、调度、记录 Trace。",
+          "kind": "process",
+          "evidence": [
+            "run",
+            "registry"
+          ]
+        },
+        {
+          "id": "eino",
+          "label": "Eino",
+          "detail": "运行顺序 Chain 和模型与 Tool 的多轮循环。",
+          "kind": "process",
+          "evidence": [
+            "chain",
+            "agent"
+          ]
+        },
+        {
+          "id": "gateway",
+          "label": "业务模型调用器",
+          "detail": "SDK 调用 ModelInvoker，业务代码再访问现有网关。",
+          "kind": "actor",
+          "evidence": [
+            "adapter"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "o1",
+          "from": "business",
+          "to": "runtime",
+          "label": "注册能力"
+        },
+        {
+          "id": "o2",
+          "from": "runtime",
+          "to": "eino",
+          "label": "组织执行"
+        },
+        {
+          "id": "o3",
+          "from": "eino",
+          "to": "gateway",
+          "label": "请求模型"
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "setup",
+      "title": "启动接入：四样东西放到一起",
+      "summary": "加载一套 JSON，准备模型调用器、函数与 Tool/Skill，再把 SDK Handler 绑定到现有入口。",
+      "nodes": [
+        {
+          "id": "config",
+          "label": "① 配置",
+          "detail": "trustee.flow 写节点顺序；systemPrompt 与 modelName 写在 Agent 节点。",
+          "kind": "store",
+          "evidence": [
+            "conf"
+          ]
+        },
+        {
+          "id": "worker",
+          "label": "② 业务实现",
+          "detail": "Functions() 按 key 给 Go 方法；Tools() 与 Models() 给工具和网关调用器。",
+          "kind": "process",
+          "evidence": [
+            "assembly",
+            "registry"
+          ]
+        },
+        {
+          "id": "new",
+          "label": "③ New + Register",
+          "detail": "创建 Runtime；注册函数、Tool、Skill。启动时不请求模型。",
+          "kind": "process",
+          "evidence": [
+            "assembly",
+            "registry"
+          ]
+        },
+        {
+          "id": "bind",
+          "label": "④ 绑定 MQ",
+          "detail": "consume-events → lubanmq.Handler(rt, \"trustee\")。",
+          "kind": "process",
+          "evidence": [
+            "mqroute",
+            "mqhandler"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "s1",
+          "from": "config",
+          "to": "new",
+          "label": "提供流程"
+        },
+        {
+          "id": "s2",
+          "from": "worker",
+          "to": "new",
+          "label": "提供实现"
+        },
+        {
+          "id": "s3",
+          "from": "new",
+          "to": "bind",
+          "label": "装配完成"
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "message",
+      "title": "一条 MQ 消息：只 Run 一次",
+      "summary": "Wecombot 入口同步等待整个 Agent；8 个顺序节点完成后再由业务消费层收尾。",
+      "nodes": [
+        {
+          "id": "mq",
+          "label": "消息到来",
+          "detail": "现有 MQ 收到 consume-events 的原始消息。",
+          "kind": "event",
+          "evidence": [
+            "mqroute"
+          ]
+        },
+        {
+          "id": "entry",
+          "label": "SDK Handler",
+          "detail": "调用 rt.Run(ctx, \"trustee\", message)，并返回 error。",
+          "kind": "process",
+          "evidence": [
+            "mqhandler"
+          ]
+        },
+        {
+          "id": "prepare",
+          "label": "取数与检查",
+          "detail": "prepareTrustee → 前置模型 → applyRoutingCheck。业务函数准备动态 Request。",
+          "kind": "process",
+          "evidence": [
+            "businessflow",
+            "request"
+          ]
+        },
+        {
+          "id": "route",
+          "label": "选择与生成",
+          "detail": "父 Agent 选择子 Agent；子加载 Skill、调用 Tool，只记录候选动作。",
+          "kind": "process",
+          "evidence": [
+            "businessflow",
+            "output",
+            "tools"
+          ]
+        },
+        {
+          "id": "review",
+          "label": "质检与执行",
+          "detail": "prepareQuality → 质检模型 → approveQuality → executeApprovedActions。",
+          "kind": "process",
+          "evidence": [
+            "quality",
+            "businessflow"
+          ]
+        },
+        {
+          "id": "finish",
+          "label": "MQ 业务收尾",
+          "detail": "原包装层保存状态/快照、释放锁；错误继续返回 MQ。",
+          "kind": "event",
+          "evidence": [
+            "mqfinish"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "m1",
+          "from": "mq",
+          "to": "entry",
+          "label": "交给 Handler"
+        },
+        {
+          "id": "m2",
+          "from": "entry",
+          "to": "prepare",
+          "label": "进入 flow"
+        },
+        {
+          "id": "m3",
+          "from": "prepare",
+          "to": "route",
+          "label": "检查通过"
+        },
+        {
+          "id": "m4",
+          "from": "route",
+          "to": "review",
+          "label": "留下候选"
+        },
+        {
+          "id": "m5",
+          "from": "review",
+          "to": "finish",
+          "label": "Run 返回"
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "inside",
+      "title": "Agent 节点内部：模型怎样用 Tool",
+      "summary": "函数交给 Agent 的是 Request；SDK 组装 Eino Agent 和工具，业务调用器负责访问模型。",
+      "nodes": [
+        {
+          "id": "req",
+          "label": "Request",
+          "detail": "Messages 放动态用户内容；Output[T]() 可声明期望结构体。",
+          "kind": "process",
+          "evidence": [
+            "request"
+          ]
+        },
+        {
+          "id": "agentnode",
+          "label": "ChatModelAgent",
+          "detail": "systemPrompt、modelName、tools、skills、maxLoopCount 来自配置。",
+          "kind": "process",
+          "evidence": [
+            "agent",
+            "conf"
+          ]
+        },
+        {
+          "id": "call",
+          "label": "ModelInvoker",
+          "detail": "把模型请求交给 Wecombot 原有网关代码发出。",
+          "kind": "process",
+          "evidence": [
+            "adapter"
+          ]
+        },
+        {
+          "id": "skilltool",
+          "label": "Skill / Tool",
+          "detail": "模型按需加载 Skill；Tool 调用记候选，执行几轮由模型与上限控制。",
+          "kind": "process",
+          "evidence": [
+            "agent",
+            "tools"
+          ]
+        },
+        {
+          "id": "result",
+          "label": "节点结果",
+          "detail": "OutputTool 成功提交结构体则交付 T；否则无 Output 时交付文本。",
+          "kind": "process",
+          "evidence": [
+            "agent",
+            "output"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "a1",
+          "from": "req",
+          "to": "agentnode",
+          "label": "输入"
+        },
+        {
+          "id": "a2",
+          "from": "agentnode",
+          "to": "call",
+          "label": "请求"
+        },
+        {
+          "id": "a3",
+          "from": "call",
+          "to": "skilltool",
+          "label": "模型选择"
+        },
+        {
+          "id": "a4",
+          "from": "skilltool",
+          "to": "agentnode",
+          "label": "继续循环"
+        },
+        {
+          "id": "a5",
+          "from": "agentnode",
+          "to": "result",
+          "label": "结束交付"
+        }
+      ],
+      "evidence": []
+    },
+    {
+      "id": "boundary",
+      "title": "讲解时别混淆这几条边界",
+      "summary": "框架负责重复的连接和调度；业务继续掌握规则、外部副作用与已有入口。",
+      "nodes": [
+        {
+          "id": "chainnode",
+          "label": "相邻传值",
+          "detail": "函数签名由反射检查；没有输出不透传旧值，类型不兼容会报错。",
+          "kind": "process",
+          "evidence": [
+            "signature",
+            "run"
+          ],
+          "failure": {
+            "impact": "后续节点无法执行",
+            "symptom": "Run 返回类型/签名错误",
+            "fallback": "修正函数签名或相邻节点契约后重试"
+          }
+        },
+        {
+          "id": "stop",
+          "label": "Stop / error",
+          "detail": "业务调用 Stop 后正常返回，后续节点停止；错误返回 nil,error。",
+          "kind": "process",
+          "evidence": [
+            "run"
+          ]
+        },
+        {
+          "id": "log",
+          "label": "runId + Trace",
+          "detail": "TraceWriter 可写业务日志；用 runId 关联一次 Run，页面离线查看。",
+          "kind": "process",
+          "evidence": [
+            "trace",
+            "traceui"
+          ]
+        },
+        {
+          "id": "entryplus",
+          "label": "HTTP / Cron / RunFrom",
+          "detail": "入口适配器另有 HTTP、Cron；RunFrom 从指定 func 开始，不恢复历史状态。",
+          "kind": "process",
+          "evidence": [
+            "httpcron",
+            "runfrom"
+          ]
+        }
+      ],
+      "edges": [
+        {
+          "id": "b1",
+          "from": "chainnode",
+          "to": "stop",
+          "label": "执行结果"
+        },
+        {
+          "id": "b2",
+          "from": "stop",
+          "to": "log",
+          "label": "记录过程"
+        },
+        {
+          "id": "b3",
+          "from": "entryplus",
+          "to": "chainnode",
+          "label": "进入同一 Runtime"
+        }
+      ],
+      "evidence": []
+    }
+  ],
+  "trace": [
+    {
+      "nodeId": "business",
+      "label": "业务模块"
+    },
+    {
+      "nodeId": "runtime",
+      "label": "Luban Runtime"
+    },
+    {
+      "nodeId": "eino",
+      "label": "Eino"
+    },
+    {
+      "nodeId": "gateway",
+      "label": "业务模型调用器"
+    },
+    {
+      "nodeId": "config",
+      "label": "① 配置"
+    },
+    {
+      "nodeId": "worker",
+      "label": "② 业务实现"
+    },
+    {
+      "nodeId": "new",
+      "label": "③ New + Register"
+    },
+    {
+      "nodeId": "bind",
+      "label": "④ 绑定 MQ"
+    },
+    {
+      "nodeId": "mq",
+      "label": "消息到来"
+    },
+    {
+      "nodeId": "entry",
+      "label": "SDK Handler"
+    },
+    {
+      "nodeId": "prepare",
+      "label": "取数与检查"
+    },
+    {
+      "nodeId": "route",
+      "label": "选择与生成"
+    },
+    {
+      "nodeId": "review",
+      "label": "质检与执行"
+    },
+    {
+      "nodeId": "finish",
+      "label": "MQ 业务收尾"
+    },
+    {
+      "nodeId": "req",
+      "label": "Request"
+    },
+    {
+      "nodeId": "agentnode",
+      "label": "ChatModelAgent"
+    },
+    {
+      "nodeId": "call",
+      "label": "ModelInvoker"
+    },
+    {
+      "nodeId": "skilltool",
+      "label": "Skill / Tool"
+    },
+    {
+      "nodeId": "result",
+      "label": "节点结果"
+    },
+    {
+      "nodeId": "chainnode",
+      "label": "相邻传值"
+    },
+    {
+      "nodeId": "stop",
+      "label": "Stop / error"
+    },
+    {
+      "nodeId": "log",
+      "label": "runId + Trace"
+    }
+  ],
+  "glossary": [
+    {
+      "term": "appKey",
+      "definition": "一次 Run 选择哪套 Agent 配置的键；示例是 trustee。"
+    },
+    {
+      "term": "Request",
+      "definition": "业务函数交给模型节点的动态消息与可选结构化输出声明。"
+    },
+    {
+      "term": "ModelInvoker",
+      "definition": "业务实现的模型调用接口；SDK 用它访问原有网关。"
+    },
+    {
+      "term": "OutputTool",
+      "definition": "声明 Output[T]() 时 SDK 给模型注册的内部结果提交工具。"
+    },
+    {
+      "term": "Stop",
+      "definition": "业务函数请求本次 flow 在该节点正常结束，函数还需自行返回。"
+    },
+    {
+      "term": "TraceWriter",
+      "definition": "业务可选实现的事件写入接口，当前 wecombot 写入日志。"
+    }
+  ],
+  "teachBack": [
+    {
+      "question": "配置写了 prepareTrustee，SDK 怎么找到实际 Go 函数？",
+      "answer": "启动时 worker.Functions() 建立名字到方法的 map，rt.Register 登记；Run 按配置名字找到并通过签名适配调用。"
+    },
+    {
+      "question": "子 Agent 调用 send_wx_msg 就已经发给用户了吗？",
+      "answer": "没有。当前 Wecombot 的 Tool 先记录候选动作，后续 prepareQuality、approveQuality 检查通过，executeApprovedActions 才执行。"
+    },
+    {
+      "question": "一个 consume-events 消息会调用几次 Run？",
+      "answer": "目前入口 Handler 同步调用一次 rt.Run(ctx, \"trustee\", message)；父选择子与质检都在这套 flow 内。"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "main",
+      "status": "verified",
+      "label": "启动时装配",
+      "note": "main.httpServer 初始化 Runtime 后交给 MQ 注册。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/main.go"
+    },
+    {
+      "id": "conf",
+      "status": "verified",
+      "label": "配置来源",
+      "note": "业务启动时读取 luban_agents.json；trustee.flow 是同一套 Agent 的顺序节点。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/conf/mount/luban_agents.json"
+    },
+    {
+      "id": "assembly",
+      "status": "verified",
+      "label": "业务装配",
+      "note": "worker 提供模型映射、业务函数、Tool；InitAIRuntime 调用 New 与 Register。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/router/airuntime.go"
+    },
+    {
+      "id": "registry",
+      "status": "verified",
+      "label": "Runtime 注册",
+      "note": "New 复制配置和模型映射；Register 检查并一次性安装函数、Tool、Skill。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/runtime.go"
+    },
+    {
+      "id": "mqroute",
+      "status": "verified",
+      "label": "MQ 入口",
+      "note": "consume-events 绑定 lubanmq.Handler(rt, trustee)。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/router/mq.go"
+    },
+    {
+      "id": "mqhandler",
+      "status": "verified",
+      "label": "SDK MQ 适配",
+      "note": "Handler 同步调用 Run，并将 error 交还现有 MQ。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/entrypoint/mq/mq.go"
+    },
+    {
+      "id": "mqfinish",
+      "status": "verified",
+      "label": "业务收尾",
+      "note": "现有包装层在 Handler 后调用 Finish 保存状态和释放锁，原错误返回 MQ。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/controllers/mq/rmq_wrapper.go"
+    },
+    {
+      "id": "run",
+      "status": "verified",
+      "label": "Run 调度",
+      "note": "Run 生成 runId、取配置快照、校验、组装节点并构建 Chain，处理 Stop/error。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/run.go"
+    },
+    {
+      "id": "chain",
+      "status": "verified",
+      "label": "Eino Chain",
+      "note": "每次 Run 临时建立并编译顺序 Chain。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/internal/eino/chain.go"
+    },
+    {
+      "id": "signature",
+      "status": "verified",
+      "label": "函数契约",
+      "note": "反射分析首参 Gin、最多一个输入/输出、可选 error，并按 Go 可赋值规则传值。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/internal/executor/function.go"
+    },
+    {
+      "id": "businessflow",
+      "status": "verified",
+      "label": "真实流程",
+      "note": "prepare、前置检查、路由、质检、动作执行按 JSON flow 顺序排列。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/conf/mount/luban_agents.json"
+    },
+    {
+      "id": "request",
+      "status": "verified",
+      "label": "动态模型输入",
+      "note": "业务函数构造 Request.Messages，Output[T]() 声明结构化结果。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/service/trustee_agent/flow.go"
+    },
+    {
+      "id": "agent",
+      "status": "verified",
+      "label": "Agent 执行",
+      "note": "SDK 构建 Eino ChatModelAgent；配置提示词、模型、工具、Skill、循环上限。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/internal/eino/agent.go"
+    },
+    {
+      "id": "adapter",
+      "status": "verified",
+      "label": "业务模型网关",
+      "note": "模型适配器把 Eino 消息交给注册的 ModelInvoker；Wecombot 的 invoker 负责实际网关调用。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/service/trustee_agent/model.go"
+    },
+    {
+      "id": "output",
+      "status": "verified",
+      "label": "父子与输出",
+      "note": "父选择子并移交；子可提交 OutputTool；未声明 Output 时传普通模型文本。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/agent.go"
+    },
+    {
+      "id": "tools",
+      "status": "verified",
+      "label": "候选动作",
+      "note": "Wecombot Tool 记录候选，不立即发微信消息；质检后才进入业务执行。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/service/trustee_agent/tools.go"
+    },
+    {
+      "id": "quality",
+      "status": "verified",
+      "label": "质检后执行",
+      "note": "prepareQuality 取候选，approveQuality 审核，executeApprovedActions 执行。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/service/trustee_agent/flow.go"
+    },
+    {
+      "id": "trace",
+      "status": "verified",
+      "label": "Trace",
+      "note": "可选 TraceWriter 接受节点事件；业务写一行 luban_trace 日志，RunID 可关联。",
+      "path": "/Users/chaijinyang/go/src/虾宝平台迁移项目/wecombot/router/luban_trace.go"
+    },
+    {
+      "id": "traceui",
+      "status": "verified",
+      "label": "离线查看",
+      "note": "SDK 仓库包含本地 trace-viewer 页面，可粘贴日志分析。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/trace-viewer/index.html"
+    },
+    {
+      "id": "httpcron",
+      "status": "verified",
+      "label": "其他入口",
+      "note": "HTTP Handler 调用 Run 后交给业务 Renderer；Cron Job 加载多项并逐项 Run。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/entrypoint/http/http.go"
+    },
+    {
+      "id": "runfrom",
+      "status": "verified",
+      "label": "另一个执行入口",
+      "note": "RunFrom 从指定业务函数节点开始，但不恢复先前 Run 的状态。",
+      "path": "/Users/chaijinyang/Documents/Ai编排方案设计V3/05-开发目录/luban/sdk/run.go"
+    }
+  ]
+}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 )
 
 type Config struct {
@@ -10,6 +11,7 @@ type Config struct {
 
 type AgentConfig struct {
 	Description string
+	ProjectKey  string
 	Flow        []NodeConfig
 }
 
@@ -83,7 +85,7 @@ func ValidateAndSnapshot(appKey string, agent AgentConfig, registry Registry) (S
 		if node.ModelName == "" {
 			return Snapshot{}, fmt.Errorf("luban: appKey %q %s must set func or modelName", appKey, location)
 		}
-		if err := validateAgentFields(appKey, location, node.ModelName, node.SystemPrompt, node.MaxLoopCount, node.Tools, registry); err != nil {
+		if err := validateAgentFields(appKey, location, node.ModelName, node.SystemPrompt, node.Temperature, node.MaxLoopCount, node.Tools, registry); err != nil {
 			return Snapshot{}, err
 		}
 		if err := collectSkills(appKey, location, node.Skills, registry, snapshot.Skills); err != nil {
@@ -97,7 +99,7 @@ func ValidateAndSnapshot(appKey string, agent AgentConfig, registry Registry) (S
 			if child.ModelName == "" || child.SystemPrompt == "" {
 				return Snapshot{}, fmt.Errorf("luban: appKey %q %s requires modelName and systemPrompt", appKey, childLocation)
 			}
-			if err := validateAgentFields(appKey, childLocation, child.ModelName, child.SystemPrompt, child.MaxLoopCount, child.Tools, registry); err != nil {
+			if err := validateAgentFields(appKey, childLocation, child.ModelName, child.SystemPrompt, child.Temperature, child.MaxLoopCount, child.Tools, registry); err != nil {
 				return Snapshot{}, err
 			}
 			if err := collectSkills(appKey, childLocation, child.Skills, registry, snapshot.Skills); err != nil {
@@ -110,6 +112,7 @@ func ValidateAndSnapshot(appKey string, agent AgentConfig, registry Registry) (S
 
 func validateAgentFields(
 	appKey, location, modelName, systemPrompt string,
+	temperature *float64,
 	maxLoopCount *int,
 	toolNames []string,
 	registry Registry,
@@ -119,6 +122,9 @@ func validateAgentFields(
 	}
 	if _, exists := registry.Models[modelName]; !exists {
 		return fmt.Errorf("luban: appKey %q %s model %q was not registered", appKey, location, modelName)
+	}
+	if temperature != nil && (math.IsNaN(*temperature) || math.IsInf(*temperature, 0) || *temperature < 0) {
+		return fmt.Errorf("luban: appKey %q %s temperature must be finite and nonnegative", appKey, location)
 	}
 	if maxLoopCount != nil && *maxLoopCount <= 0 {
 		return fmt.Errorf("luban: appKey %q %s maxLoopCount must be positive when specified", appKey, location)
@@ -151,7 +157,7 @@ func collectSkills(
 }
 
 func cloneAgent(src AgentConfig) AgentConfig {
-	dst := AgentConfig{Description: src.Description, Flow: make([]NodeConfig, len(src.Flow))}
+	dst := AgentConfig{Description: src.Description, ProjectKey: src.ProjectKey, Flow: make([]NodeConfig, len(src.Flow))}
 	for i, node := range src.Flow {
 		dst.Flow[i] = cloneNode(node)
 	}

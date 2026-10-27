@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const sharedDataGinKey = "__luban_shared_data_v1"
@@ -12,10 +13,13 @@ const sharedDataGinKey = "__luban_shared_data_v1"
 // runData is shared by Gin copies, but belongs to exactly one Run. Closing it
 // also invalidates copies retained by callbacks after that Run has finished.
 type runData struct {
-	mu       sync.RWMutex
-	values   map[string]any
-	readonly bool
-	closed   bool
+	mu        sync.RWMutex
+	values    map[string]any
+	readonly  bool
+	closed    bool
+	databases map[string]*gorm.DB
+	resources map[string]any
+	skills    map[string]Skill
 }
 
 // Set stores a value for this Run. Business functions and ordinary Agent Tools
@@ -72,6 +76,9 @@ func (data *runData) close() {
 	defer data.mu.Unlock()
 	data.closed = true
 	data.values = nil
+	data.databases = nil
+	data.resources = nil
+	data.skills = nil
 }
 
 func (data *runData) readonlySnapshot() *runData {
@@ -84,5 +91,8 @@ func (data *runData) readonlySnapshot() *runData {
 	for key, value := range data.values {
 		snapshot.values[key] = value
 	}
+	snapshot.databases = data.databases
+	snapshot.resources = data.resources
+	snapshot.skills = data.skills
 	return snapshot
 }

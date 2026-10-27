@@ -102,7 +102,7 @@ func (rt *Runtime) runRequestAgent(
 	parentName := fmt.Sprintf("luban_flow_%d", flowIndex)
 	collector := internaleino.NewOutputCollector()
 	parentConfig, parentInvoker, err := rt.makeEinoAgentConfig(
-		parentName, node.Description, node.ModelName, node.SystemPrompt,
+		rt.config.Agents[appKey].ProjectKey, parentName, node.Description, node.ModelName, node.SystemPrompt,
 		node.Temperature, node.MaxLoopCount, node.Tools, node.Skills,
 		request.Output, internaleino.AgentScope{
 			AppKey: appKey, FlowIndex: flowIndex, Name: parentName,
@@ -123,7 +123,7 @@ func (rt *Runtime) runRequestAgent(
 		childName := fmt.Sprintf("luban_flow_%d_sub_%d", flowIndex, childIndex)
 		childNames[childName] = childIndex
 		childConfig, childInvoker, err := rt.makeEinoAgentConfig(
-			childName, child.Description, child.ModelName, child.SystemPrompt,
+			rt.config.Agents[appKey].ProjectKey, childName, child.Description, child.ModelName, child.SystemPrompt,
 			child.Temperature, child.MaxLoopCount, child.Tools, child.Skills,
 			request.Output, internaleino.AgentScope{
 				AppKey: appKey, FlowIndex: flowIndex, Name: childName,
@@ -200,7 +200,7 @@ func (rt *Runtime) runRequestAgent(
 }
 
 func (rt *Runtime) makeEinoAgentConfig(
-	name, description, modelName, systemPrompt string,
+	projectKey, name, description, modelName, systemPrompt string,
 	temperature *float64,
 	maxLoopCount *int,
 	toolNames, skillNames []string,
@@ -208,14 +208,14 @@ func (rt *Runtime) makeEinoAgentConfig(
 	scope internaleino.AgentScope,
 	isParent bool,
 ) (internaleino.AgentConfig, internaleino.ModelInvoker, error) {
-	invoker, exists := rt.models[modelName]
-	if !exists || isNilInterface(invoker) {
-		return internaleino.AgentConfig{}, nil, fmt.Errorf("model %q was not registered", modelName)
+	invoker, err := rt.modelFor(projectKey, modelName)
+	if err != nil {
+		return internaleino.AgentConfig{}, nil, err
 	}
 
 	agentTools := make([]internaleino.Tool, 0, len(toolNames))
 	for _, toolName := range toolNames {
-		registeredTool, exists := rt.tools[toolName]
+		registeredTool, exists := rt.toolsFor(scope.AppKey)[toolName]
 		if !exists {
 			return internaleino.AgentConfig{}, nil, fmt.Errorf("Tool %q was not registered", toolName)
 		}
@@ -237,7 +237,7 @@ func (rt *Runtime) makeEinoAgentConfig(
 	agentSkills := make([]internaleino.Skill, 0, len(skillNames))
 	agentSkillBackends := make([]internaleino.SkillBackendSource, 0, len(skillNames))
 	for _, skillName := range skillNames {
-		if skill, exists := rt.skills[skillName]; exists {
+		if skill, exists := rt.skillsFor(scope.AppKey)[skillName]; exists {
 			agentSkills = append(agentSkills, internaleino.Skill{
 				Name:        skill.Name,
 				Description: skill.Description,

@@ -1,0 +1,6 @@
+.git
+docs
+**/*_test.go
+**/testdata
+*.log
+conf/*.local.*

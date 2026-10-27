@@ -6,8 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ModelInvoker performs one model HTTP request. The business module owns the
-// gateway client, authentication, retries, and provider-specific protocol.
+// ModelInvoker performs one model request. The service can use a configured
+// default HTTP client or inject an existing business gateway implementation.
 type ModelInvoker interface {
 	Name() string
 	Invoke(ctx *gin.Context, req ModelRequest) (ModelResponse, error)

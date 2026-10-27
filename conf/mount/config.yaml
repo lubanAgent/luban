@@ -1,0 +1,16 @@
+log:
+  level: info
+  stdout: false
+  buffer:
+    switch: "false"
+accessLog: {}
+server:
+  # 本地 TCP 地址；容器内的 Unix Socket 选择沿用 golib。
+  address: ":8080"
+  readtimeout: 30s
+  writetimeout: 120s
+  gracefultimeout: 30s
+pprof:
+  # 开发环境不开额外端口；线上规则由 golib 决定。
+  enable: false
+gcPercent: 0

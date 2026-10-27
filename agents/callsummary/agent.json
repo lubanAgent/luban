@@ -1,0 +1,7 @@
+{
+  "flow": [
+    {"func": "PrepareCall"},
+    {"modelName": "deepseek-v4-flash", "systemPrompt": "总结通话中的客户诉求、处理结果和后续安排。"},
+    {"func": "BuildResult"}
+  ]
+}

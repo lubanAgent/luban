@@ -1,32 +1,17 @@
-name: SDK
+name: Luban company checks
 
 on:
-  pull_request:
-    paths:
-      - "sdk/**"
-      - "scripts/check-sdk*"
-      - "Makefile"
-      - ".github/workflows/sdk.yml"
-  push:
-    branches: [main]
-    paths:
-      - "sdk/**"
-      - "scripts/check-sdk*"
-      - "Makefile"
-      - ".github/workflows/sdk.yml"
+  workflow_dispatch:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ["1.24.1", "1.25.x"]
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    # Company adapters need a trusted runner with private module access.
+    # Do not run untrusted PRs on this runner.
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
-          cache-dependency-path: sdk/go.sum
-      - run: make check-sdk
+          go-version: "1.25.x"
+          cache-dependency-path: go.sum
+      - run: make check

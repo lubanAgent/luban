@@ -1,9 +1,30 @@
 package luban
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	internaleino "github.com/lubanAgent/luban/sdk/internal/eino"
 )
+
+// LookupSkill reads a static Skill from this Run's startup snapshot. A business
+// preparation node may include required knowledge in its Request, using the
+// same source as the model's on-demand Skill tool. Dynamic backends are not run.
+func LookupSkill(ctx *gin.Context, name string) (Skill, error) {
+	data := dataFromGin(ctx)
+	if data == nil {
+		return Skill{}, fmt.Errorf("luban: LookupSkill requires an active Run")
+	}
+	data.mu.RLock()
+	defer data.mu.RUnlock()
+	if data.closed {
+		return Skill{}, fmt.Errorf("luban: LookupSkill called after Run completed")
+	}
+	skill, exists := data.skills[name]
+	if !exists {
+		return Skill{}, fmt.Errorf("luban: static Skill %q was not loaded for this Agent", name)
+	}
+	return skill, nil
+}
 
 // Skill is a reusable instruction document available to an Agent.
 type Skill struct {

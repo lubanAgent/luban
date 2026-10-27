@@ -1,0 +1,5 @@
+# Transport only. All model connections and credentials live in conf/luban.yaml.
+modelHTTP:
+  timeout: 120s
+  connectTimeout: 3s
+  retry: 2

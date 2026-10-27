@@ -1,0 +1,4 @@
+# No business database is needed for summary/callsummary or JSON-only Agents.
+# Add named connections here when enabling a business that needs them.
+# See docs/XXSY适配版.md for the admissions connection example.
+mysql: {}

@@ -1,14 +1,8 @@
 http:
   address: :8080
   routePrefix: /luban/ai/agent
-  # admissions 需要受信任的业务任务输入，不开放通用同步 HTTP。
-  excludeAgents: [admissions]
 
-# 按需启用业务后台任务；纯配置 Agent 无需填写。
-backgroundAgents: []
-
-# 同一项目可供多个 Agent 共用；模型名填写在各自的 agent.json 中。
 llm:
   admissions:
-    - baseUrl: ${LUBAN_OPENPROXY_BASE_URL}
-      apiKey: ${LUBAN_OPENPROXY_KEY}
+    - baseUrl: https://openproxy-cn.yukework.com/openproxy/rp/v1/chat/completions
+      apiKey: zyb-47560493e1607dbf4a360c966a863bb2@xianxiake

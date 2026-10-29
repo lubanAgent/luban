@@ -17,7 +17,6 @@ import (
 	serverhttp "git.yukework.com/pkg/golib/v2/server/http"
 	golibsignal "git.yukework.com/pkg/golib/v2/server/signal"
 	"git.yukework.com/pkg/golib/v2/zlog"
-	ips "git.yukework.com/saas/ips-client/v2"
 	"github.com/lubanAgent/luban/conf"
 	"github.com/lubanAgent/luban/server"
 	"gorm.io/gorm"
@@ -36,8 +35,7 @@ func Configure(options *server.Options, command server.Command) (closeHost func(
 		return nil, fmt.Errorf("company adapter: server options must not be nil")
 	}
 	// 1. 读取本工程 conf/mount 下的公司配置。
-	// HTTP 模式还需要 IPS 登录配置；命令行单次运行 Agent 不加载这部分。
-	configuration, err := conf.LoadCompany(".", command.IsHTTP())
+	configuration, err := conf.LoadCompany(".")
 	if err != nil {
 		return nil, err
 	}
@@ -125,15 +123,11 @@ func Configure(options *server.Options, command server.Command) (closeHost func(
 	if options.TraceWriter == nil {
 		options.TraceWriter = companyTraceWriter{}
 	}
-	// 7. 只有启动 Web 服务才装配登录校验、监听和退出回调。
-	// 命令行执行一次 Agent 后直接返回，无需登录，也不监听端口。
+	// 7. 只有启动 Web 服务才装配 HTTP 基础能力、监听和退出回调。
+	// 命令行执行一次 Agent 后直接返回，不监听端口。
 	if command.IsHTTP() {
 		if options.SetupHTTP == nil {
-			// 此处创建 IPS 客户端；收到业务 HTTP 请求时再由中间件检查会话。
-			login := configuration.Custom.Ips
-			client := ips.NewIpsClient(ips.WithAppId(login.AppID), ips.WithSecret(login.AppSecret),
-				ips.WithDomain(login.Domain), ips.WithServiceName(login.ServerName))
-			options.SetupHTTP = companyHTTPSetup(configuration, client)
+			options.SetupHTTP = companyHTTPSetup(configuration)
 		}
 		if options.ServeHTTP == nil {
 			options.ServeHTTP = companyHTTPServer(configuration.Basic.Server, serverhttp.Start)

@@ -37,20 +37,12 @@ type Company struct {
 	Resource struct {
 		Mysql map[string]base.MysqlConf `yaml:"mysql"`
 	}
-	Custom struct {
-		Ips struct {
-			Domain     string `yaml:"domain"`
-			AppID      string `yaml:"app_id"`
-			AppSecret  string `yaml:"app_secret"`
-			ServerName string `yaml:"server_name"`
-		} `yaml:"ips"`
-	}
 }
 
 // LoadCompany reads conf/mount in this repository or the deployed service.
 // Environment variables are expanded after YAML parsing, so punctuation in
 // passwords cannot change the YAML structure. Errors never include values.
-func LoadCompany(root string, httpService bool) (*Company, error) {
+func LoadCompany(root string) (*Company, error) {
 	result := &Company{}
 	for _, file := range []struct {
 		name   string
@@ -59,13 +51,7 @@ func LoadCompany(root string, httpService bool) (*Company, error) {
 		{"config.yaml", &result.Basic},
 		{"api.yaml", &result.API},
 		{"resource.yaml", &result.Resource},
-		{"custom.yaml", &result.Custom},
 	} {
-		// CLI execution needs model/business resources, not HTTP login. Do not
-		// expand IPS secrets or require custom.yaml when there is no listener.
-		if file.name == "custom.yaml" && !httpService {
-			continue
-		}
 		raw, err := os.ReadFile(filepath.Join(root, "conf", "mount", file.name))
 		if err != nil {
 			if os.IsNotExist(err) && (file.name == "resource.yaml" || file.name == "api.yaml") {
@@ -88,10 +74,6 @@ func LoadCompany(root string, httpService bool) (*Company, error) {
 	}
 	if result.API.ModelHTTP.Timeout < 0 || result.API.ModelHTTP.ConnectTimeout < 0 || result.API.ModelHTTP.Retry < 0 {
 		return nil, fmt.Errorf("conf/mount/api.yaml modelHTTP timeouts and retry must not be negative")
-	}
-	ips := result.Custom.Ips
-	if httpService && (ips.Domain == "" || ips.AppID == "" || ips.AppSecret == "" || ips.ServerName == "") {
-		return nil, fmt.Errorf("conf/mount/custom.yaml requires IPS domain, app_id, app_secret and server_name")
 	}
 	if result.Basic.Log.Level == "" {
 		result.Basic.Log.Level = "info"

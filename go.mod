@@ -3,7 +3,6 @@ module github.com/lubanAgent/luban
 go 1.25
 
 require (
-	git.yukework.com/saas/ips-client/v2 v2.8.4
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.8.13
 	github.com/eino-contrib/jsonschema v1.0.3

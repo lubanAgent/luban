@@ -1,5 +1,5 @@
 ips:
-  domain: ${LUBAN_IPS_DOMAIN}
-  app_id: ${LUBAN_IPS_APP_ID}
-  app_secret: ${LUBAN_IPS_APP_SECRET}
-  server_name: luban
+  domain: http://ips-svc.saas:8080
+  app_id: xianxiake
+  app_secret: 075355690adea6cbdd8059f1610758b9
+  server_name: schoolservice

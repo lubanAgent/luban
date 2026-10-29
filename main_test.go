@@ -64,7 +64,7 @@ func TestRootBinaryRunsAllAgentsAndNewJSONAgentWithoutBusinessDB(t *testing.T) {
 	defer gateway.Close()
 	t.Setenv("LUBAN_OPENPROXY_BASE_URL", gateway.URL+"/gateway/v1")
 	t.Setenv("LUBAN_OPENPROXY_KEY", "smoke-key")
-	for _, key := range []string{"LUBAN_DB_ADDR", "LUBAN_DB_NAME", "LUBAN_DB_USER", "LUBAN_DB_PASSWORD", "LUBAN_IPS_DOMAIN", "LUBAN_IPS_APP_ID", "LUBAN_IPS_APP_SECRET"} {
+	for _, key := range []string{"LUBAN_DB_ADDR", "LUBAN_DB_NAME", "LUBAN_DB_USER", "LUBAN_DB_PASSWORD"} {
 		t.Setenv(key, "")
 	}
 	binary := filepath.Join(t.TempDir(), "luban")
@@ -163,12 +163,6 @@ llm:
 `,
 		"conf/mount/resource.yaml": "mysql: {}\n",
 		"conf/mount/api.yaml":      "modelHTTP:\n  timeout: 10s\n",
-		"conf/mount/custom.yaml": `ips:
-  domain: ${LUBAN_IPS_DOMAIN}
-  app_id: ${LUBAN_IPS_APP_ID}
-  app_secret: ${LUBAN_IPS_APP_SECRET}
-  server_name: luban
-`,
 	} {
 		destination := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
@@ -190,14 +184,10 @@ func TestRootHTTPAssemblyLoadsAddedAgentAndUsesInjectedHostLifecycle(t *testing.
 	defer gateway.Close()
 	t.Setenv("LUBAN_OPENPROXY_BASE_URL", gateway.URL+"/v1")
 	t.Setenv("LUBAN_OPENPROXY_KEY", "smoke-key")
-	for key, value := range map[string]string{"LUBAN_IPS_DOMAIN": "https://ips.invalid", "LUBAN_IPS_APP_ID": "test-app", "LUBAN_IPS_APP_SECRET": "test-secret"} {
-		t.Setenv(key, value)
-	}
 	t.Chdir(root)
 	var traces bytes.Buffer
 	options := server.Options{Assets: os.DirFS("."), TraceWriter: server.NewJSONTraceWriter(&traces),
-		// Authentication behavior itself is covered by adapters' fake-IPS tests.
-		// Replace only host lifecycle here; there is no listener or IPS network.
+		// A caller can still inject its own middleware and listener.
 		SetupHTTP: func(engine *gin.Engine) error {
 			engine.Use(func(ctx *gin.Context) {
 				if ctx.GetHeader("X-Test-Login") != "yes" {

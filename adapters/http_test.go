@@ -4,22 +4,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"git.yukework.com/pkg/golib/v2/env"
 	serverhttp "git.yukework.com/pkg/golib/v2/server/http"
-	ips "git.yukework.com/saas/ips-client/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/lubanAgent/luban/conf"
 )
 
-type sessionCallback func(*gin.Context) (ips.IpsSession, error)
-
-func (get sessionCallback) GetSession(ctx *gin.Context) (ips.IpsSession, error) { return get(ctx) }
-
-func TestCompanyHTTPBootstrapKeepsInfrastructureOutsideLogin(t *testing.T) {
+func TestCompanyHTTPBootstrapAllowsAgentWithoutSession(t *testing.T) {
 	if env.GetRunEnv() != env.RunEnvTest {
 		t.Skip("golib starts a profiling listener in non-test environments")
 	}
@@ -27,40 +21,26 @@ func TestCompanyHTTPBootstrapKeepsInfrastructureOutsideLogin(t *testing.T) {
 	// process globals. Pprof is disabled; all requests use httptest, no listener.
 	oldMode := gin.Mode()
 	t.Cleanup(func() { gin.SetMode(oldMode) })
-	loginCalls := 0
-	client := sessionCallback(func(ctx *gin.Context) (ips.IpsSession, error) {
-		loginCalls++
-		if ctx.GetHeader("X-Test-Login") != "yes" {
-			return ips.IpsSession{}, nil
-		}
-		return ips.IpsSession{Uid: 123, Uname: "tester"}, nil
-	})
 	engine := gin.New()
-	if err := companyHTTPSetup(&conf.Company{}, client)(engine); err != nil {
+	if err := companyHTTPSetup(&conf.Company{})(engine); err != nil {
 		t.Fatal(err)
 	}
 	engine.POST("/business", func(ctx *gin.Context) {
-		ctx.String(200, "%d|%s", ctx.GetInt64("operatorId"), ctx.ClientIP())
+		ctx.String(200, "ok|%s", ctx.ClientIP())
 	})
 	for _, path := range []string{"/ready", "/runtime-metrics"} {
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
-		if response.Code != http.StatusOK || loginCalls != 0 {
-			t.Fatalf("infrastructure %s: code=%d login calls=%d", path, response.Code, loginCalls)
+		if response.Code != http.StatusOK {
+			t.Fatalf("infrastructure %s: code=%d", path, response.Code)
 		}
 	}
-	response := httptest.NewRecorder()
-	engine.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/business", nil))
-	if !strings.Contains(response.Body.String(), `"errNo":5002`) || loginCalls != 1 {
-		t.Fatal("business route bypassed login")
-	}
 	request := httptest.NewRequest(http.MethodPost, "/business", nil)
-	request.Header.Set("X-Test-Login", "yes")
 	request.Header.Set("X-Original-Forwarded-For", "203.0.113.7")
-	response = httptest.NewRecorder()
+	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
-	if response.Body.String() != "123|203.0.113.7" {
-		t.Fatalf("identity or company proxy IP handling missing: %s", response.Body.String())
+	if response.Body.String() != "ok|203.0.113.7" {
+		t.Fatalf("anonymous business request or company proxy IP handling failed: %s", response.Body.String())
 	}
 }
 

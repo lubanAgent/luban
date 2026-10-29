@@ -2,7 +2,7 @@
 
 一份 Agent 配置描述执行流程，框架负责模型调用、Tool/Skill、节点传值和 Trace。一个服务、一份 main.go，运行多个 Agent。
 
-当前分支已接入公司 golib 与 IPS；开发需要 Go 1.25+ 和公司私有基础库权限。SDK/server 不导入公司包，也不依赖原 admissions 工程。
+当前分支已接入公司 golib；开发需要 Go 1.25+ 和公司私有基础库权限。SDK/server 不导入公司包，也不依赖原 admissions 工程。
 
 ## 三步运行第一个 Agent
 
@@ -20,9 +20,9 @@
    go run . run summary --input '{"userPrompt":"会议结论：先完成迁移，再安排联调。"}'
    ```
 
-CLI 最终结果写 stdout，普通日志和 Trace 统一走公司 zlog，输出位置由 `conf/mount/config.yaml` 的日志配置决定；默认本地写入 `log/luban.log`。CLI 不需要 IPS 或业务数据库。增加纯配置 Agent 只需增加 `agents/<名字>/agent.json`，复用同一项目连接，无需改 main 或登记 Go 包。含 Go 函数/Tool 的 Agent 才需要在 `agents/imports.go` 导入对应包。
+CLI 最终结果写 stdout，普通日志和 Trace 统一走公司 zlog，输出位置由 `conf/mount/config.yaml` 的日志配置决定；默认本地写入 `log/luban.log`。CLI 不需要业务数据库。增加纯配置 Agent 只需增加 `agents/<名字>/agent.json`，复用同一项目连接，无需改 main 或登记 Go 包。含 Go 函数/Tool 的 Agent 才需要在 `agents/imports.go` 导入对应包。
 
-HTTP 使用 `go run .` 启动。公司版须先填写 `conf/mount/custom.yaml` 的 IPS 配置并登录，再访问 `POST /luban/ai/agent/summary`。完整文本、图片、视频与多项目例子见[快速接入](docs/快速接入.md)。
+HTTP 使用 `go run .` 启动。当前不检查登录会话，直接访问 `POST /luban/ai/agent/chat`。完整文本、图片、视频与多项目例子见[快速接入](docs/快速接入.md)。
 
 ## 启动与边界
 
@@ -35,7 +35,7 @@ HTTP 使用 `go run .` 启动。公司版须先填写 `conf/mount/custom.yaml` �
 | 目录 | 内容 |
 | --- | --- |
 | `agents/` | 每个 Agent 的配置、函数、Tool、Skill、领域规则和专属 API；`imports.go` 聚合 Go 包 |
-| `adapters/` | 公司日志、模型 HTTP 传输、Gorm 初始化、IPS、Renderer 和监听；不包含 Agent 业务 |
+| `adapters/` | 公司日志、模型 HTTP 传输、Gorm 初始化、Renderer 和监听；不包含 Agent 业务 |
 | `conf/` | `luban.yaml` 管模型连接/服务入口；`mount/` 管公司资源 |
 | `models/` | 数据库连接、表结构与业务读写 |
 | `router/` | 通用 HTTP 路由；与 SDK 使用同一套输入解析 |
@@ -52,7 +52,7 @@ HTTP 使用 `go run .` 启动。公司版须先填写 `conf/mount/custom.yaml` �
 
 ## 验证与部署
 
-`make check` 检查格式、依赖、普通/race 测试、vet 和构建。测试包括真实根二进制 CLI、新增纯 JSON Agent、公司 HTTP 传输与项目路由、统一 HTTP 输入、显式业务启用及退出。仅使用 fake 网关、httptest 和临时 SQLite；真实 IPS、业务数据库、模型效果与容器仍待联调。
+`make check` 检查格式、依赖、普通/race 测试、vet 和构建。测试包括真实根二进制 CLI、新增纯 JSON Agent、公司 HTTP 传输与项目路由、统一 HTTP 输入、显式业务启用及退出。仅使用 fake 网关、httptest 和临时 SQLite；真实业务数据库、模型效果与容器仍待联调。
 
 Trace 搜索 `luban_trace` / `runId`，收集后导入 [离线查看页](sdk/trace-viewer/index.html)，本期不落库。
 

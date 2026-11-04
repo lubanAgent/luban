@@ -65,8 +65,16 @@ type ModelRequest struct {
 	ModelName   string
 	Messages    []Message
 	Tools       []ToolDefinition
+	ToolChoice  ToolChoice
 	Temperature *float64
 }
+
+type ToolChoice string
+
+const (
+	ToolChoiceAllowed  ToolChoice = "allowed"
+	ToolChoiceRequired ToolChoice = "required"
+)
 
 // ModelResponse is one provider-neutral model response.
 type ModelResponse struct {

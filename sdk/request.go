@@ -51,10 +51,11 @@ type OutputSpec struct {
 	goType          reflect.Type
 	batchResultType reflect.Type
 	makeBatchResult func([]batchItemValue) (any, error)
+	makeZeroResult  func() any
 }
 
 func (s *OutputSpec) valid() bool {
-	return s != nil && s.goType != nil && s.makeBatchResult != nil
+	return s != nil && s.goType != nil && s.makeBatchResult != nil && s.makeZeroResult != nil
 }
 
 type batchItemValue struct {
@@ -64,12 +65,18 @@ type batchItemValue struct {
 
 // Output declares the structured result type for a model or Agent invocation.
 // When used by Batch, the returned spec can construct the actual named
-// BatchResult[T] type without inferring T from a downstream function.
+// BatchResult[T] type without inferring T from a downstream function. Empty
+// inputs use its type to produce a typed zero or typed empty BatchResult
+// without calling the model.
 func Output[T any]() *OutputSpec {
 	return &OutputSpec{
 		goType:          reflect.TypeFor[T](),
 		batchResultType: reflect.TypeFor[BatchResult[T]](),
 		makeBatchResult: makeBatchResult[T],
+		makeZeroResult: func() any {
+			var zero T
+			return zero
+		},
 	}
 }
 

@@ -26,6 +26,7 @@ type Event struct {
 	StartedAt          time.Time       `json:"startedAt"`
 	DurationNs         int64           `json:"durationNs"`
 	Status             string          `json:"status"`
+	SkipReason         string          `json:"skipReason,omitempty"`
 	Input              json.RawMessage `json:"input"`
 	Output             json.RawMessage `json:"output"`
 	Error              string          `json:"error,omitempty"`
@@ -162,6 +163,16 @@ func (s *Span) End(output any, status string, err error) {
 	// Diagnostics cannot change an application result.
 	defer func() { _ = recover() }()
 	rec.write(s.ctx, s.event)
+}
+
+// EndSkipped closes a flow Agent wrapper without creating model/tool spans.
+// The result remains the actual typed value; the reason is separate metadata.
+func (s *Span) EndSkipped(output any, reason string) {
+	if s == nil {
+		return
+	}
+	s.event.SkipReason = reason
+	s.End(output, "skipped", nil)
 }
 
 func Snapshot(value any) (result json.RawMessage) {

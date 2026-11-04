@@ -18,8 +18,18 @@ type ModelRequest struct {
 	ModelName   string
 	Messages    []ModelMessage
 	Tools       []ToolDefinition
+	ToolChoice  ToolChoice
 	Temperature *float64
 }
+
+// ToolChoice controls whether a model may choose tools or must call one.
+// Empty retains provider defaults; when tools are present this means Allowed.
+type ToolChoice string
+
+const (
+	ToolChoiceAllowed  ToolChoice = "allowed"
+	ToolChoiceRequired ToolChoice = "required"
+)
 
 // ModelMessage preserves message content and tool-call relationships.
 type ModelMessage struct {

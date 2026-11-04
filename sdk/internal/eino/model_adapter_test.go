@@ -167,6 +167,33 @@ func TestEinoModelAdapterPreservesTemperatureNilAndZero(t *testing.T) {
 	}
 }
 
+func TestEinoModelAdapterChoosesOutputOnlyToolChoice(t *testing.T) {
+	adapter := &einoModelAdapter{modelName: "model"}
+	output := &schema.ToolInfo{Name: RuntimeOutputToolName}
+	lookup := &schema.ToolInfo{Name: "lookup"}
+	for _, tc := range []struct {
+		name  string
+		tools []*schema.ToolInfo
+		opts  []model.Option
+		want  ToolChoice
+	}{
+		{"output only", []*schema.ToolInfo{output}, nil, ToolChoiceRequired},
+		{"business and output", []*schema.ToolInfo{lookup, output}, nil, ToolChoiceAllowed},
+		{"business only", []*schema.ToolInfo{lookup}, nil, ToolChoiceAllowed},
+		{"no tools", nil, nil, ""},
+		{"explicit allowed wins", []*schema.ToolInfo{output}, []model.Option{model.WithToolChoice(schema.ToolChoiceAllowed)}, ToolChoiceAllowed},
+		{"explicit forced wins", []*schema.ToolInfo{lookup, output}, []model.Option{model.WithToolChoice(schema.ToolChoiceForced)}, ToolChoiceRequired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := append([]model.Option{model.WithTools(tc.tools)}, tc.opts...)
+			req, err := adapter.makeRequest([]*schema.Message{schema.UserMessage("work")}, opts...)
+			if err != nil || req.ToolChoice != tc.want {
+				t.Fatalf("choice=%q want=%q err=%v", req.ToolChoice, tc.want, err)
+			}
+		})
+	}
+}
+
 func TestResponseToEinoMessagePreservesOptionalUsage(t *testing.T) {
 	withUsage, err := responseToEinoMessage(ModelResponse{
 		Content: []Part{{Type: PartText, Text: "hello"}},

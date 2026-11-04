@@ -56,7 +56,17 @@ func (m *protocolModel) invokeOpenAI(ctx *gin.Context, request ModelRequest) (Mo
 				"name": definition.Name, "description": definition.Description, "parameters": parameters,
 			}})
 		}
-		payload["tools"], payload["tool_choice"] = tools, "auto"
+		payload["tools"] = tools
+		switch request.ToolChoice {
+		case "", ToolChoiceAllowed:
+			payload["tool_choice"] = "auto"
+		case ToolChoiceRequired:
+			payload["tool_choice"] = "required"
+		default:
+			return ModelResponse{}, fmt.Errorf("openai: unsupported tool choice %q", request.ToolChoice)
+		}
+	} else if request.ToolChoice != "" {
+		return ModelResponse{}, fmt.Errorf("openai: tool choice %q requires tools", request.ToolChoice)
 	}
 	var response struct {
 		Choices []struct {
@@ -72,6 +82,9 @@ func (m *protocolModel) invokeOpenAI(ctx *gin.Context, request ModelRequest) (Mo
 		} `json:"usage"`
 	}
 	if err := m.post(ctx, modelEndpoint(m.connection.BaseURL, "openai"), payload, &response); err != nil {
+		if request.ToolChoice == ToolChoiceRequired {
+			return ModelResponse{}, fmt.Errorf("openai tool_choice=required: %w", err)
+		}
 		return ModelResponse{}, err
 	}
 	if len(response.Choices) == 0 {

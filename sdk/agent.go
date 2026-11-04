@@ -66,7 +66,7 @@ func (rt *Runtime) runAgentNode(
 	}
 	switch input := incoming.Value.(type) {
 	case Request:
-		return rt.runRequestAgent(ctx, ginCtx, appKey, flowIndex, node, input)
+		return rt.runRequestAgent(ctx, ginCtx, appKey, flowIndex, node, input, true)
 	case Batch:
 		return rt.runBatchAgent(ctx, ginCtx, appKey, flowIndex, node, input)
 	default:
@@ -81,7 +81,14 @@ func (rt *Runtime) runRequestAgent(
 	flowIndex int,
 	node NodeConfig,
 	request Request,
+	skipEmpty bool,
 ) (nodeValue, error) {
+	if skipEmpty && len(request.Messages) == 0 {
+		if !request.Output.valid() {
+			return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] empty Request requires valid Output[T]()", appKey, flowIndex)
+		}
+		return nodeValue{Value: request.Output.makeZeroResult(), HasValue: true}, nil
+	}
 	messages := make([]internaleino.Message, 0, len(request.Messages))
 	for _, message := range request.Messages {
 		converted := internaleino.Message{Role: string(message.Role)}
@@ -288,15 +295,22 @@ func (rt *Runtime) runBatchAgent(
 	node NodeConfig,
 	batch Batch,
 ) (nodeValue, error) {
-	if len(batch.Items) == 0 {
-		return nodeValue{}, ErrEmptyBatch
-	}
-	if batch.Output != nil && !batch.Output.valid() {
-		return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] Batch OutputSpec is invalid; use Output[T]()", appKey, flowIndex)
-	}
 	concurrency := batch.Concurrency
 	if concurrency < 0 {
 		return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] Batch concurrency must not be negative", appKey, flowIndex)
+	}
+	if len(batch.Items) == 0 {
+		if !batch.Output.valid() {
+			return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] empty Batch requires valid Output[T](): %w", appKey, flowIndex, ErrEmptyBatch)
+		}
+		value, err := batch.Output.makeBatchResult(nil)
+		if err != nil {
+			return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] empty Batch result: %w", appKey, flowIndex, err)
+		}
+		return nodeValue{Value: value, HasValue: true}, nil
+	}
+	if batch.Output != nil && !batch.Output.valid() {
+		return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] Batch OutputSpec is invalid; use Output[T]()", appKey, flowIndex)
 	}
 	if concurrency == 0 {
 		concurrency = 10
@@ -382,6 +396,7 @@ func (rt *Runtime) runBatchItem(
 		flowIndex,
 		node,
 		itemRequest,
+		false, // An item with no messages is still an item; never skip the whole Batch.
 	)
 	if cancelErr := itemCtx.Err(); cancelErr != nil {
 		if err != nil {

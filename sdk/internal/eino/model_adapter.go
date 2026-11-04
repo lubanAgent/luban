@@ -112,6 +112,20 @@ func (m *einoModelAdapter) makeRequest(messages []*schema.Message, opts ...model
 		}
 		request.Tools = append(request.Tools, definition)
 	}
+	if common.ToolChoice != nil {
+		switch *common.ToolChoice {
+		case schema.ToolChoiceAllowed:
+			request.ToolChoice = ToolChoiceAllowed
+		case schema.ToolChoiceForced:
+			request.ToolChoice = ToolChoiceRequired
+		default:
+			return ModelRequest{}, fmt.Errorf("unsupported Eino ToolChoice %q", *common.ToolChoice)
+		}
+	} else if len(request.Tools) == 1 && request.Tools[0].Name == RuntimeOutputToolName {
+		request.ToolChoice = ToolChoiceRequired
+	} else if len(request.Tools) > 0 {
+		request.ToolChoice = ToolChoiceAllowed
+	}
 	return request, nil
 }
 

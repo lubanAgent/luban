@@ -65,6 +65,16 @@ func (m *protocolModel) invokeAnthropic(ctx *gin.Context, request ModelRequest) 
 			tools = append(tools, map[string]any{"name": definition.Name, "description": definition.Description, "input_schema": schema})
 		}
 		payload["tools"] = tools
+		switch request.ToolChoice {
+		case "", ToolChoiceAllowed:
+			// Anthropic defaults to auto when tools are present.
+		case ToolChoiceRequired:
+			payload["tool_choice"] = map[string]string{"type": "any"}
+		default:
+			return ModelResponse{}, fmt.Errorf("anthropic: unsupported tool choice %q", request.ToolChoice)
+		}
+	} else if request.ToolChoice != "" {
+		return ModelResponse{}, fmt.Errorf("anthropic: tool choice %q requires tools", request.ToolChoice)
 	}
 	var response struct {
 		Type    string `json:"type"`
@@ -84,6 +94,9 @@ func (m *protocolModel) invokeAnthropic(ctx *gin.Context, request ModelRequest) 
 		} `json:"usage"`
 	}
 	if err := m.post(ctx, modelEndpoint(m.connection.BaseURL, "anthropic"), payload, &response); err != nil {
+		if request.ToolChoice == ToolChoiceRequired {
+			return ModelResponse{}, fmt.Errorf("anthropic tool_choice=any: %w", err)
+		}
 		return ModelResponse{}, err
 	}
 	if response.Type != "message" || len(response.Content) == 0 {

@@ -209,6 +209,7 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 				kind, name = "agent", node.ModelName
 			}
 			traceCtx, span := internaltrace.Start(current, kind, name, &index, "", traceNodeValue(incoming), node.Description)
+			skipped := false
 			defer func() {
 				if recovered := recover(); recovered != nil {
 					span.End(nil, "", fmt.Errorf("node panicked: %v", recovered))
@@ -218,6 +219,10 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 				if state.stopped.Load() && returnedErr != nil && errors.Is(returnedErr, errStopCurrentFlow) {
 					status = "stopped"
 					span.End(traceNodeValue(state.stopNode), status, nil)
+					return
+				}
+				if skipped && returnedErr == nil {
+					span.EndSkipped(traceNodeValue(returned), "empty_input")
 					return
 				}
 				span.End(traceNodeValue(returned), status, returnedErr)
@@ -252,6 +257,14 @@ func (rt *Runtime) runFrom(ctx *gin.Context, appKey, startFunc string, requireSt
 			}
 			if callbackErr != nil {
 				return nodeValue{}, fmt.Errorf("luban: appKey %q flow[%d] node %q: %w", appKey, index, nodeName, callbackErr)
+			}
+			if node.Func == "" {
+				switch input := incoming.Value.(type) {
+				case Request:
+					skipped = len(input.Messages) == 0
+				case Batch:
+					skipped = len(input.Items) == 0
+				}
 			}
 			if state.stopped.Load() {
 				state.stopNode = output

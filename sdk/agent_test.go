@@ -240,7 +240,7 @@ func TestRunAgentOutputToolReturnsConcreteStruct(t *testing.T) {
 	}
 	requests := invoker.snapshot()
 	if len(requests) != 1 || len(requests[0].Tools) != 1 ||
-		requests[0].Tools[0].Name != runtimeOutputToolName {
+		requests[0].Tools[0].Name != runtimeOutputToolName || requests[0].ToolChoice != ToolChoiceRequired {
 		t.Fatalf("OutputTool was not registered with the model: %+v", requests)
 	}
 	if len(requests[0].Tools[0].Parameters) == 0 {
@@ -378,7 +378,8 @@ func TestRunAgentCallsBusinessToolThenReturnsOutput(t *testing.T) {
 		t.Fatalf("model requests = %d, want tool round then OutputTool round", len(requests))
 	}
 	if len(requests[0].Tools) != 2 || requests[0].Tools[0].Name != "lookup" ||
-		requests[0].Tools[1].Name != runtimeOutputToolName {
+		requests[0].Tools[1].Name != runtimeOutputToolName ||
+		requests[0].ToolChoice != ToolChoiceAllowed || requests[1].ToolChoice != ToolChoiceAllowed {
 		t.Fatalf("model tool definitions = %+v", requests[0].Tools)
 	}
 	if len(requests[0].Tools[0].Parameters) == 0 {
@@ -712,6 +713,10 @@ func TestParentAgentTransfersToChildAndUsesChildOutput(t *testing.T) {
 	if len(childRequests[0].Tools) != 1 || childRequests[0].Tools[0].Name != runtimeOutputToolName {
 		t.Fatalf("child should receive the shared Output contract: %+v", childRequests[0].Tools)
 	}
+	if parentRequests[0].ToolChoice != ToolChoiceAllowed ||
+		childRequests[0].ToolChoice != ToolChoiceRequired {
+		t.Fatalf("parent choice=%q child choice=%q", parentRequests[0].ToolChoice, childRequests[0].ToolChoice)
+	}
 }
 
 func TestParentAgentWithoutTransferPassesNilToNextFunction(t *testing.T) {
@@ -903,6 +908,9 @@ func TestRunAgentLoadsOnlyConfiguredSkillOnDemand(t *testing.T) {
 	if len(requests[0].Tools) != 2 || requests[0].Tools[0].Name != runtimeOutputToolName ||
 		requests[0].Tools[1].Name != "skill" {
 		t.Fatalf("model did not receive OutputTool and Skill loader: %+v", requests[0].Tools)
+	}
+	if requests[0].ToolChoice != ToolChoiceAllowed || requests[1].ToolChoice != ToolChoiceAllowed {
+		t.Fatalf("Skill load requires optional tool selection: %+v", requests)
 	}
 	var sawSkillBody bool
 	for _, message := range requests[1].Messages {

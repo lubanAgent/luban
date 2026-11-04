@@ -27,5 +27,6 @@ type BatchItemResult[T any] struct {
 	Err   error
 }
 
-// ErrEmptyBatch is returned when a batch has no items.
+// ErrEmptyBatch identifies an empty Batch without a valid Output[T] contract.
+// A typed empty Batch is a successful skipped model node.
 var ErrEmptyBatch = errors.New("luban: empty batch")

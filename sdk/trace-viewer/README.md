@@ -6,6 +6,8 @@
 
 工具不依赖 Wecombot 的业务字段。其他模块注册同一个 SDK `TraceWriter`，把 SDK 的版本 1 `TraceEvent` 直接写成 JSON 行，或者放在业务日志的 `traceEvent` 字段中，即可复用。日志外层的 `level`、`module`、`requestId` 等字段只属于业务包装；页面按 `runId` 分组，要求事件本身保留 `spanId`、`parentSpanId` 等 SDK 字段。若模块只输出自己的业务 JSON、没有 `TraceEvent`，页面不会把它自动解释成调用树。
 
+空 Request/Batch 且声明 `Output[T]()` 时，当前模型节点的外层 Agent 事件标记 `status: "skipped"`、`skipReason: "empty_input"`；页面显示“已跳过”及原因。该节点没有实际模型/Tool/Skill span，后续业务函数照常展示。Run 的最终状态仍反映整个执行结果；`parseLogs` 返回的 `skipped` 行数只统计未识别的日志行，与节点的跳过状态不是同一指标。
+
 “查看演示数据”会加载**明确标记的模拟事件**，只供预览布局，不代表真实 Agent 执行结果。页面会提示缺失父节点、重复 spanId 和缺失 Run 根事件，无法判断日志系统是否丢掉了未收到的其他事件。Token 没有来源时显示“未提供”。
 
 新 Trace 事件会把配置 `description` 放在业务函数/Agent 节点上：调用树显示业务描述，下一行保留技术名称，详情保留完整说明。旧日志没有该字段时，可以展开导入区的“附加 Agent 配置 JSON”，粘贴或选择对应的 `luban_agents.json` 后重新解析；配置最外层直接是 appKey，不使用 `agents` 包装层。如果配置里有多个 Agent 且日志缺失 Run 根节点，页面无法判断该用哪个 appKey，须等待完整日志。缺失父节点会显示为明确标记的占位层级，例如 `s_12` 未收到时 Skill 归在其下，但占位不是一次真实执行事件。

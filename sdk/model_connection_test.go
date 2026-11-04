@@ -241,6 +241,98 @@ func TestOpenAIWirePreservesMediaAndParallelToolCalls(t *testing.T) {
 	}
 }
 
+func TestOpenAIWireToolChoice(t *testing.T) {
+	for _, tc := range []struct {
+		choice ToolChoice
+		want   string
+	}{{ToolChoiceRequired, "required"}, {ToolChoiceAllowed, "auto"}, {"", "auto"}} {
+		t.Run(tc.want+"-"+string(tc.choice), func(t *testing.T) {
+			doer := doerFunc(func(r *http.Request) (*http.Response, error) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body["tool_choice"] != tc.want {
+					t.Fatalf("tool_choice=%v want=%s", body["tool_choice"], tc.want)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))}, nil
+			})
+			rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1", APIKey: "secret"}}}, HTTPDoer: doer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			invoker, err := rt.modelFor("", "real-model")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = invoker.Invoke(newGinContextForAgentTest(t), ModelRequest{
+				ModelName: "real-model", Tools: []ToolDefinition{{Name: runtimeOutputToolName}}, ToolChoice: tc.choice,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestOpenAIRequiredRejectedDoesNotRetryAsAuto(t *testing.T) {
+	var calls int
+	doer := doerFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["tool_choice"] != "required" {
+			t.Fatalf("unexpected fallback: %v", body["tool_choice"])
+		}
+		return &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(`{"error":"unsupported"}`))}, nil
+	})
+	rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1", APIKey: "secret"}}}, HTTPDoer: doer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoker, err := rt.modelFor("", "real-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = invoker.Invoke(newGinContextForAgentTest(t), ModelRequest{
+		ModelName: "real-model", Tools: []ToolDefinition{{Name: runtimeOutputToolName}}, ToolChoice: ToolChoiceRequired,
+	})
+	if err == nil || !strings.Contains(err.Error(), "tool_choice=required") ||
+		!strings.Contains(err.Error(), "HTTP status 400") || calls != 1 {
+		t.Fatalf("error=%v calls=%d", err, calls)
+	}
+}
+
+func TestAnthropicWireRequiredToolChoice(t *testing.T) {
+	doer := doerFunc(func(r *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		choice, ok := body["tool_choice"].(map[string]any)
+		if !ok || choice["type"] != "any" {
+			t.Fatalf("tool_choice=%v", body["tool_choice"])
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"type":"message","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}`))}, nil
+	})
+	rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test", APIKey: "secret", Protocol: "anthropic"}}}, HTTPDoer: doer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoker, err := rt.modelFor("", "real-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = invoker.Invoke(newGinContextForAgentTest(t), ModelRequest{
+		ModelName: "real-model", Tools: []ToolDefinition{{Name: runtimeOutputToolName}}, ToolChoice: ToolChoiceRequired,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestModelFailuresAreRedactedAndPreserveErrorChain(t *testing.T) {
 	cause := errors.New("authorization: secret-key")
 	rt, err := New(Options{Projects: map[string][]ModelConnection{"p": {{BaseURL: "https://example.test", APIKey: "secret-key"}}}, HTTPDoer: doerFunc(func(*http.Request) (*http.Response, error) { return nil, cause })})

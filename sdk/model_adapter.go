@@ -34,8 +34,9 @@ func invokePublicModel(invoker ModelInvoker, ctx *gin.Context, request ModelRequ
 
 func modelRequestFromInternal(request internaleino.ModelRequest) ModelRequest {
 	result := ModelRequest{
-		ModelName: request.ModelName,
-		Tools:     make([]ToolDefinition, 0, len(request.Tools)),
+		ModelName:  request.ModelName,
+		ToolChoice: ToolChoice(request.ToolChoice),
+		Tools:      make([]ToolDefinition, 0, len(request.Tools)),
 	}
 	if request.Temperature != nil {
 		temperature := *request.Temperature

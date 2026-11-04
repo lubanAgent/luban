@@ -6,7 +6,7 @@
 })(globalThis, function () {
   "use strict";
 
-  const statuses = new Set(["success", "error", "stopped"]);
+  const statuses = new Set(["success", "error", "stopped", "skipped"]);
 
   function extractEvents(value) {
     if (Array.isArray(value)) return value.flatMap(extractEvents);
@@ -30,6 +30,9 @@
       typeof event.durationNs === "number" && Number.isFinite(event.durationNs) &&
       event.durationNs >= 0 &&
       typeof event.status === "string" && statuses.has(event.status) &&
+      (event.status !== "skipped" || (event.type === "agent" &&
+        Number.isInteger(event.flowIndex) && event.skipReason === "empty_input")) &&
+      (event.status === "skipped" || !event.skipReason) &&
       (event.parentSpanId == null || typeof event.parentSpanId === "string");
   }
 
@@ -248,6 +251,32 @@
     return JSON.stringify(value, null, 2) ?? String(value);
   }
 
+  // Trace can contain strings produced by encoding a JSON value once or more.
+  // Expand object/array strings recursively for the detail view while keeping
+  // ordinary text and the original payload available for diagnostics.
+  function expandJSONValue(value, depth = 0) {
+    if (depth >= 6) return value;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (!((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]")))) return value;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object")
+          return expandJSONValue(parsed, depth + 1);
+      } catch {
+        return value;
+      }
+      return value;
+    }
+    if (Array.isArray(value))
+      return value.map(item => expandJSONValue(item, depth + 1));
+    if (value && typeof value === "object")
+      return Object.fromEntries(Object.entries(value)
+        .map(([key, item]) => [key, expandJSONValue(item, depth + 1)]));
+    return value;
+  }
+
   // Only model responses carry gateway usage. Aggregate those events once,
   // never add Agent/Run totals on top of their child model events.
   function tokenUsage(entries, ancestor = null) {
@@ -295,5 +324,6 @@
     ].map(item => JSON.stringify({ msg: "luban_trace", runId, traceEvent: item })).join("\n");
   }
 
-  return { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue, tokenUsage, demoLog };
+  return { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue,
+    expandJSONValue, tokenUsage, demoLog };
 });

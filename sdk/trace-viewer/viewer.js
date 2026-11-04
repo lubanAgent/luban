@@ -8,7 +8,7 @@
     run: "Run", function: "业务函数", agent: "Agent", model: "模型调用",
     tool: "Tool", skill: "Skill", batchItem: "Batch 项",
   };
-  const statusNames = { success: "成功", stopped: "已停止", error: "失败" };
+  const statusNames = { success: "成功", stopped: "已停止", error: "失败", skipped: "已跳过" };
   const glyphs = { run: "R", function: "ƒ", agent: "A", model: "M", tool: "T", skill: "S", batchItem: "B" };
 
   function element(tag, text, className) {
@@ -250,10 +250,96 @@
     for (const root of (view.displayRoots || view.roots)) draw(root, 0);
     if (!drawn) target.append(element("p", "没有匹配的节点。", "tree-empty"));
   }
-  function section(title, content, extraClass = "") {
+  async function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const input = element("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    document.body.append(input);
+    input.select();
+    const copied = document.execCommand("copy");
+    input.remove();
+    if (!copied) throw new Error("clipboard is unavailable");
+  }
+  function section(title, content, extraClass = "", copyable = false) {
     const node = element("section", undefined, "detail-section");
-    node.append(element("h3", title), element("pre", content, `code-box ${extraClass}`));
+    const head = element("div", undefined, "detail-section-head");
+    head.append(element("h3", title));
+    if (copyable) {
+      const button = element("button", "复制", "copy-button");
+      button.type = "button";
+      button.setAttribute("aria-label", `复制${title}`);
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          await copyText(content);
+          button.textContent = "已复制";
+          button.classList.add("copied");
+        } catch {
+          button.textContent = "复制失败";
+          button.classList.add("failed");
+        }
+        setTimeout(() => {
+          button.textContent = "复制";
+          button.disabled = false;
+          button.classList.remove("copied", "failed");
+        }, 1600);
+      });
+      head.append(button);
+    }
+    node.append(head, element("pre", content, `code-box ${extraClass}`));
     return node;
+  }
+  function field(object, name) {
+    if (!object || typeof object !== "object") return undefined;
+    if (Object.prototype.hasOwnProperty.call(object, name)) return object[name];
+    const matched = Object.keys(object).find(key => key.toLowerCase() === name.toLowerCase());
+    return matched ? object[matched] : undefined;
+  }
+  function modelDataSummary(event, direction) {
+    const raw = direction === "input" ? event.input : event.output;
+    const value = data.expandJSONValue(raw);
+    if (!value || typeof value !== "object") return [];
+    const facts = [];
+    if (direction === "input") {
+      const messages = field(value, "messages");
+      const tools = field(value, "tools");
+      const choice = field(value, "toolChoice");
+      if (Array.isArray(messages)) facts.push(["消息", `${messages.length} 条`]);
+      if (Array.isArray(tools)) facts.push(["工具", `${tools.length} 个`]);
+      if (choice) facts.push(["工具选择", String(choice)]);
+    } else {
+      const finish = field(value, "finishReason");
+      const calls = field(value, "toolCalls");
+      const content = field(value, "content");
+      if (finish) facts.push(["结束原因", String(finish)]);
+      if (Array.isArray(calls)) {
+        const names = calls.map(call => field(call, "name")).filter(Boolean);
+        facts.push(["工具调用", names.length ? names.join("、") : "0 个"]);
+      }
+      if (Array.isArray(content)) {
+        const chars = content.reduce((total, part) => {
+          const text = field(part, "text");
+          return total + (typeof text === "string" ? text.length : 0);
+        }, 0);
+        facts.push(["文本内容", `${chars} 字符`]);
+      }
+    }
+    return facts;
+  }
+  function dataSummary(facts) {
+    const list = element("div", undefined, "data-facts");
+    for (const [label, value] of facts) {
+      const item = element("div", undefined, "data-fact");
+      item.append(element("small", label), element("strong", value));
+      list.append(item);
+    }
+    return list;
   }
   function renderDetail(entry) {
     const target = byId("detail");
@@ -288,6 +374,8 @@
     const scroll = element("div", undefined, "detail-scroll");
     if (state.detailTab === "overview") {
       if (event.error) scroll.append(section("执行错误", event.error, "error-box"));
+      if (event.status === "skipped" && event.skipReason === "empty_input")
+        scroll.append(element("p", "跳过原因：模型节点输入为空（empty_input）", "detail-preview"));
       if (event.type === "model") {
         const tokenLine = element("div", undefined, "token-summary");
         tokenLine.append(metric("输入 Token", usage.known ? count(usage.input) : "未提供"),
@@ -308,7 +396,17 @@
       scroll.append(details);
     } else {
       const value = state.detailTab === "input" ? event.input : event.output;
-      scroll.append(section(state.detailTab === "input" ? "完整输入" : "完整输出", data.formatValue(value)));
+      const facts = event.type === "model" ? modelDataSummary(event, state.detailTab) : [];
+      if (facts.length) scroll.append(dataSummary(facts));
+      const expanded = data.expandJSONValue(value);
+      scroll.append(section(state.detailTab === "input" ? "完整输入" : "完整输出",
+        data.formatValue(expanded), "expanded-data", true));
+      if (data.formatValue(expanded) !== data.formatValue(value)) {
+        const raw = element("details", undefined, "raw-details raw-payload");
+        raw.append(element("summary", "原始字符串"),
+          element("pre", data.formatValue(value), "code-box raw-code"));
+        scroll.append(raw);
+      }
       if (value && typeof value === "object" && value._traceUnavailable)
         scroll.append(element("p", "该值无法序列化；上方保留 SDK 提供的类型与原因。", "data-note"));
     }

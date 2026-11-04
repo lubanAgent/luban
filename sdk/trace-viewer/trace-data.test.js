@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue, tokenUsage, demoLog } = require("./trace-data.js");
+const { parseLogs, readConfig, describeEvents, buildRun, displayName, formatValue,
+  expandJSONValue, tokenUsage, demoLog } = require("./trace-data.js");
 
 function event(spanId, parentSpanId = "", overrides = {}) {
   return {
@@ -31,6 +32,23 @@ test("parses SDK JSON, logkit wrappers, nested JSON strings and mixed business l
   assert.equal(run.roots[0].children[0].event.output, "complete Skill content");
 });
 
+test("parses skipped model flow with empty_input reason and no phantom model span", () => {
+  const events = [
+    event("s_1", "", { type: "run" }),
+    event("s_2", "s_1", { type: "agent", name: "review", flowIndex: 1,
+      status: "skipped", skipReason: "empty_input", output: { value: 0 } }),
+  ];
+  const parsed = parseLogs(events.map(e => JSON.stringify(e)).join("\n"));
+  assert.equal(parsed.accepted, 2);
+  assert.equal(parsed.skipped, 0);
+  const view = buildRun(parsed.groups.get("run-1"));
+  assert.equal(view.displayEntries.length, 2);
+  assert.equal(view.entries[1].event.status, "skipped");
+  assert.equal(view.entries.some(entry => entry.event.type === "model"), false);
+  const invalid = parseLogs(JSON.stringify({ ...events[1], skipReason: "" }));
+  assert.equal(invalid.accepted, 0);
+});
+
 test("accepts a pretty JSON array and preserves null, strings, and unavailable markers", () => {
   const source = [
     event("s_1", "", { type: "run", output: null }),
@@ -44,6 +62,25 @@ test("accepts a pretty JSON array and preserves null, strings, and unavailable m
   assert.equal(formatValue(source[1].input), '"{\\"raw\\":\\"text\\"}"');
   assert.match(formatValue(source[1].output), /unsupported type/);
   assert.equal(formatValue(undefined), "字段未提供");
+});
+
+test("expands serialized model requests and tool arguments for readable detail output", () => {
+  const output = JSON.stringify({
+    Content: [{ Type: "text", Text: "" }],
+    ToolCalls: [{
+      ID: "call-1",
+      Name: "__runtime_output",
+      Arguments: JSON.stringify({ knowledge: [{ id: "K-01", title: "分类", startSec: 3 }] }),
+    }],
+    FinishReason: "tool_calls",
+  });
+  const expanded = expandJSONValue(output);
+  assert.equal(expanded.FinishReason, "tool_calls");
+  assert.deepEqual(expanded.ToolCalls[0].Arguments.knowledge[0],
+    { id: "K-01", title: "分类", startSec: 3 });
+  assert.doesNotMatch(formatValue(expanded), /\\\\\"/);
+  assert.equal(expandJSONValue("ordinary text"), "ordinary text");
+  assert.equal(expandJSONValue('{"broken":'), '{"broken":');
 });
 
 test("keeps all events visible when parent logs are missing or span IDs collide", () => {

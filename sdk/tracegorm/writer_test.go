@@ -129,7 +129,7 @@ func TestDefaultsAndValidation(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*Options){
 		"empty service": func(o *Options) { o.Service = " " },
-		"service size":  func(o *Options) { o.Service = strings.Repeat("中", 65) },
+		"service size":  func(o *Options) { o.Service = strings.Repeat("中", 129) },
 		"utf8 service":  func(o *Options) { o.Service = "\xff" },
 		"queue":         func(o *Options) { o.QueueSize = -1 },
 		"batch":         func(o *Options) { o.BatchSize = -1 },
@@ -150,12 +150,36 @@ func TestDefaultsAndValidation(t *testing.T) {
 			}
 		})
 	}
+	if o, err := (Options{Service: strings.Repeat("中", 128)}).normalized(); err != nil {
+		t.Fatalf("expanded Service limit rejected: %v", err)
+	} else if o.Service == "" {
+		t.Fatal("Service was not preserved")
+	}
+}
+
+func TestExpandedTraceFieldLimits(t *testing.T) {
+	event := exampleEvent(strings.Repeat("s", 64))
+	event.RunID = strings.Repeat("r", 64)
+	event.Type = strings.Repeat("t", 64)
+	if err := validateEvent(event); err != nil {
+		t.Fatalf("valid expanded fields rejected: %v", err)
+	}
+	metadata, err := readMetadata(func(*gin.Context) Metadata {
+		return Metadata{
+			BusinessType: strings.Repeat("类", 64),
+			BusinessID:   strings.Repeat("业", 255),
+			RequestID:    strings.Repeat("请", 255),
+		}
+	}, nil)
+	if err != nil || metadata.BusinessID == "" {
+		t.Fatalf("expanded metadata limit rejected: %+v %v", metadata, err)
+	}
 }
 
 func TestNewChecksWithoutCreatingOrClosingDatabase(t *testing.T) {
 	db := testDB(t, false)
 	for name, handle := range map[string]*gorm.DB{
-		"nil": nil, "zero": {}, "missing tables": db,
+		"nil": nil, "zero": {},
 		"errored": db.Session(&gorm.Session{}), "dry run": db.Session(&gorm.Session{DryRun: true}),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -166,6 +190,13 @@ func TestNewChecksWithoutCreatingOrClosingDatabase(t *testing.T) {
 				t.Fatal("invalid connection accepted")
 			}
 		})
+	}
+	emptyWriter, err := New(context.Background(), db, Options{Service: "test"})
+	if err != nil {
+		t.Fatalf("empty database without Trace tables rejected: %v", err)
+	}
+	if err := closeWriter(t, emptyWriter); err != nil {
+		t.Fatal(err)
 	}
 	var count int64
 	if err := db.Raw(`SELECT COUNT(*) FROM sqlite_master WHERE type='table'`).Scan(&count).Error; err != nil || count != 0 {
@@ -259,7 +290,8 @@ func TestRoundtripMetadataDuplicatesAndSnapshot(t *testing.T) {
 	}
 	if row.BusinessID != "123" || row.RequestID != "req_1" || row.AgentKey != "review" ||
 		row.Service != "test" || row.Status != "success" ||
-		!row.StartedAt.Equal(root.StartedAt.UTC().Truncate(time.Microsecond)) || row.DurationNs != root.DurationNs {
+		!row.StartedAt.Equal(root.StartedAt.UTC().Truncate(time.Microsecond)) || row.DurationNs != root.DurationNs ||
+		row.CreateTime <= 0 || row.Deleted != 0 {
 		t.Fatalf("bad run projection: %+v", row)
 	}
 }
@@ -326,9 +358,9 @@ func TestInvalidEventsAreVisibleAndNotTruncated(t *testing.T) {
 	mutations := []func(*luban.TraceEvent){
 		func(e *luban.TraceEvent) { e.Version = 2 },
 		func(e *luban.TraceEvent) { e.RunID = "" },
-		func(e *luban.TraceEvent) { e.SpanID = strings.Repeat("s", 33) },
+		func(e *luban.TraceEvent) { e.SpanID = strings.Repeat("s", 65) },
 		func(e *luban.TraceEvent) { e.ParentSpanID = "尾" },
-		func(e *luban.TraceEvent) { e.TransferFromSpanID = strings.Repeat("s", 33) },
+		func(e *luban.TraceEvent) { e.TransferFromSpanID = strings.Repeat("s", 65) },
 		func(e *luban.TraceEvent) { e.Type = "" },
 		func(e *luban.TraceEvent) { e.Status = "running" },
 		func(e *luban.TraceEvent) { e.Status = "skipped"; e.SkipReason = "empty_input" }, // only a flow Agent may skip
@@ -341,7 +373,7 @@ func TestInvalidEventsAreVisibleAndNotTruncated(t *testing.T) {
 		func(e *luban.TraceEvent) { e.Input = json.RawMessage("{") },
 		func(e *luban.TraceEvent) { e.Output = json.RawMessage{'"', 0xff, '"'} },
 		func(e *luban.TraceEvent) { e.Type = "run" }, // parent not empty
-		func(e *luban.TraceEvent) { *e = rootEvent(); e.Name = strings.Repeat("中", 192) },
+		func(e *luban.TraceEvent) { *e = rootEvent(); e.Name = strings.Repeat("中", 256) },
 	}
 	for _, mutate := range mutations {
 		event := exampleEvent("invalid")
@@ -385,7 +417,7 @@ func TestMetadataFailureAndErrorCallbackPanicPreserveEvent(t *testing.T) {
 					if mode == "panic" {
 						panic("bad metadata")
 					}
-					return Metadata{BusinessID: strings.Repeat("x", 192)}
+					return Metadata{BusinessID: strings.Repeat("x", 256)}
 				}
 				o.OnError = func(WriteError) { panic("bad logger") }
 			})

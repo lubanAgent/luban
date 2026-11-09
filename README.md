@@ -6,7 +6,7 @@
 
 当前开发分支 `codex/record-sdk-trace` 已实现可选 [Trace Gorm writer](sdk/tracegorm/README.md)：宿主注入数据库连接，后台批量保存完整事件，支持失败统计和退出排空。设计见 [开发 Spec](docs/specs/record-sdk-trace.md)，本地测试见 [验证记录](docs/specs/record-sdk-trace-validation.md)。record 尚未接入，真实 MySQL/OceanBase 与正式版本下载仍待验收。
 
-Trace 表采用 `tblLubanTraceRun` 和 `tblLubanTraceSpan00`～`tblLubanTraceSpan19`；Span 按完整 runId 的 CRC32 IEEE 值取模 20，写入与查询共用 `tracegorm.SpanTable(runID)`。同次 Run 的事件落在同一张表，全部建表 SQL 仍需宿主显式执行。
+Trace 表采用 `tblLubanTraceRun` 和 `tblLubanTraceSpan0`～`tblLubanTraceSpan19`；Span 按完整 runId 的 CRC32 IEEE 值取模 20，编号从 0 开始且不补零。写入与查询共用 `tracegorm.SpanTable(runID)`，同次 Run 的事件落在同一张表；全部建表 SQL 仍需宿主显式执行。
 
 **空模型输入跳过：** 顺序 flow 中，`Request{Output: luban.Output[T]()}` 的 `Messages` 为空时，模型节点不请求模型，交给下一函数类型为 T 的零值；`Batch{Output: luban.Output[T]()}` 的 `Items` 为空时交付 `BatchResult[T]` 的空 Items。两者均继续后续节点，在 Trace 中标记 `skipped` / `empty_input`。不声明有效 Output 的空输入报错；单个 Batch 项消息为空不会跳过整批。详见[验证记录](docs/specs/empty-input-skip-validation.md)。
 

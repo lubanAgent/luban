@@ -32,9 +32,10 @@ type Writer struct {
 
 var _ luban.TraceWriter = (*Writer)(nil)
 
-// New checks existing schema using ctx and WriteTimeout, then starts a worker.
-// It never creates tables or closes db. Cancelling ctx after New succeeds does
-// not stop persistence; use Close for shutdown.
+// New validates local options and the injected base Gorm handle, then starts a
+// worker. It performs no ping, schema inspection, migration, or table creation;
+// the host guarantees the Trace tables are ready. Cancelling ctx after New
+// succeeds does not stop persistence; use Close for shutdown.
 func New(ctx context.Context, db *gorm.DB, options Options) (*Writer, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("tracegorm: startup context must not be nil")
@@ -47,13 +48,8 @@ func New(ctx context.Context, db *gorm.DB, options Options) (*Writer, error) {
 	if err != nil {
 		return nil, err
 	}
-	checkCtx, cancel := context.WithTimeout(ctx, options.WriteTimeout)
-	defer cancel()
-	if err := store.check(checkCtx); err != nil {
-		return nil, fmt.Errorf("tracegorm: schema check: %w", err)
-	}
-	if err := checkCtx.Err(); err != nil {
-		return nil, fmt.Errorf("tracegorm: schema check: %w", err)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("tracegorm: startup context: %w", err)
 	}
 	return startWriter(store, options), nil
 }

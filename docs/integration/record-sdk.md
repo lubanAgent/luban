@@ -270,13 +270,13 @@ trace_store 连接需要实际增加初始化：当前 record 的 `helpers.InitM
 | 拟建表 | record 如何使用 |
 | --- | --- |
 | `tblLubanTraceRun` | 按业务标识、服务、Agent、时间找到一次完成运行 |
-| `tblLubanTraceSpan00`～`tblLubanTraceSpan19` | 按 runId 固定分 20 张，同次 Run 的事件同表；用 `tracegorm.SpanTable(runID)` 定位，包含最终 Run 事件 |
+| `tblLubanTraceSpan0`～`tblLubanTraceSpan19` | 按 runId 固定分 20 张，编号从 0 开始且不补零；同次 Run 的事件同表，用 `tracegorm.SpanTable(runID)` 定位，包含最终 Run 事件 |
 
-DDL 以 [Spec 第 6 节](../specs/record-sdk-trace.md#6-表结构与幂等) 为唯一来源，由数据库变更流程执行。SDK 不自动建库、建表，也不关闭宿主连接。
+DDL 以 [Spec 第 6 节](../specs/record-sdk-trace.md#6-表结构与幂等) 为唯一来源，由数据库变更流程执行。SDK 不自动建库、建表，New 也不检查表和连接，不关闭宿主连接。
 
 运行时写库失败不改变业务结果。必须保留全量 Trace 日志及错误计数：数据库写入是尽力而为，队列满、持续故障或进程强杀可能丢失入库记录。只看到 Run 成功或 run 摘要行，不等于全部 Trace 已存储。
 
-未启用落库可以只注入日志 writer；明确启用后，如果建表/连接检查失败，初始化报错，不静默假装启用成功。
+未启用落库可以只注入日志 writer；明确启用后，宿主需先准备并验证数据库和表。SDK 初始化不主动探测，实际写入失败通过 OnError/Stats 暴露。
 
 ## 6. 退出和回退怎么处理
 

@@ -14,19 +14,23 @@ import (
 // Row types stay private. Table and column names are explicit so a host's Gorm
 // NamingStrategy cannot redirect writes to business tables.
 type spanRow struct {
-	RunID        string  `gorm:"column:run_id;primaryKey;autoIncrement:false"`
-	SpanID       string  `gorm:"column:span_id;primaryKey;autoIncrement:false"`
+	ID           uint64  `gorm:"column:id;primaryKey;autoIncrement"`
+	RunID        string  `gorm:"column:run_id"`
+	SpanID       string  `gorm:"column:span_id"`
 	ParentSpanID string  `gorm:"column:parent_span_id"`
 	Kind         string  `gorm:"column:kind"`
 	Status       string  `gorm:"column:status"`
 	StartedAt    utcTime `gorm:"column:started_at"`
 	DurationNs   int64   `gorm:"column:duration_ns"`
 	EventJSON    string  `gorm:"column:event_json"`
-	CreateTime   utcTime `gorm:"column:create_time"`
+	CreateTime   int64   `gorm:"column:create_time"`
+	UpdateTime   int64   `gorm:"column:update_time"`
+	Deleted      uint8   `gorm:"column:deleted"`
 }
 
 type runRow struct {
-	RunID        string  `gorm:"column:run_id;primaryKey;autoIncrement:false"`
+	ID           uint64  `gorm:"column:id;primaryKey;autoIncrement"`
+	RunID        string  `gorm:"column:run_id"`
 	Service      string  `gorm:"column:service"`
 	AgentKey     string  `gorm:"column:agent_key"`
 	BusinessType string  `gorm:"column:business_type"`
@@ -36,7 +40,9 @@ type runRow struct {
 	StartedAt    utcTime `gorm:"column:started_at"`
 	DurationNs   int64   `gorm:"column:duration_ns"`
 	ErrorMsg     string  `gorm:"column:error_msg"`
-	CreateTime   utcTime `gorm:"column:create_time"`
+	CreateTime   int64   `gorm:"column:create_time"`
+	UpdateTime   int64   `gorm:"column:update_time"`
+	Deleted      uint8   `gorm:"column:deleted"`
 }
 
 func (runRow) TableName() string { return runTable }
@@ -103,7 +109,8 @@ func encode(event luban.TraceEvent, service string, metadata Metadata) (entry, e
 		Kind: event.Type, Status: event.Status,
 		StartedAt:  utcTime{event.StartedAt.UTC().Truncate(time.Microsecond)},
 		DurationNs: event.DurationNs, EventJSON: string(raw),
-		CreateTime: utcTime{now.UTC().Truncate(time.Microsecond)},
+		CreateTime: now.Unix(),
+		UpdateTime: now.Unix(),
 	}
 	item := entry{span: row, bytes: int64(len(raw)) + int64(len(meta)), queuedAt: now}
 	if event.Type == "run" {
@@ -111,7 +118,8 @@ func encode(event luban.TraceEvent, service string, metadata Metadata) (entry, e
 			RunID: event.RunID, Service: service, AgentKey: event.Name,
 			BusinessType: metadata.BusinessType, BusinessID: metadata.BusinessID,
 			RequestID: metadata.RequestID, Status: row.Status, StartedAt: row.StartedAt,
-			DurationNs: row.DurationNs, ErrorMsg: event.Error, CreateTime: row.CreateTime,
+			DurationNs: row.DurationNs, ErrorMsg: event.Error,
+			CreateTime: row.CreateTime, UpdateTime: row.UpdateTime,
 		}
 	}
 	// Only immutable serialized data and scalar fields survive this call.
@@ -123,10 +131,10 @@ func validateEvent(e luban.TraceEvent) error {
 	switch {
 	case e.Version != 1:
 		return fmt.Errorf("%w: version must be 1", ErrInvalidEvent)
-	case !asciiID(e.RunID, 36, false) || !asciiID(e.SpanID, 32, false) ||
-		!asciiID(e.ParentSpanID, 32, true) || !asciiID(e.TransferFromSpanID, 32, true):
+	case !asciiID(e.RunID, 64, false) || !asciiID(e.SpanID, 64, false) ||
+		!asciiID(e.ParentSpanID, 64, true) || !asciiID(e.TransferFromSpanID, 64, true):
 		return fmt.Errorf("%w: invalid run/span identity", ErrInvalidEvent)
-	case !asciiID(e.Type, 32, false):
+	case !asciiID(e.Type, 64, false):
 		return fmt.Errorf("%w: invalid event type", ErrInvalidEvent)
 	case e.Status != "success" && e.Status != "error" && e.Status != "stopped" && e.Status != "skipped":
 		return fmt.Errorf("%w: invalid status", ErrInvalidEvent)
@@ -142,7 +150,7 @@ func validateEvent(e luban.TraceEvent) error {
 	case !utf8.ValidString(e.Name) || !utf8.ValidString(e.Description) ||
 		!utf8.ValidString(e.AgentName) || !utf8.ValidString(e.Error):
 		return fmt.Errorf("%w: invalid UTF-8 text", ErrInvalidEvent)
-	case e.Type == "run" && (e.ParentSpanID != "" || !validText(e.Name, 191) || (e.Name == "" && e.Status != "error")):
+	case e.Type == "run" && (e.ParentSpanID != "" || !validText(e.Name, 255) || (e.Name == "" && e.Status != "error")):
 		return fmt.Errorf("%w: invalid run parent or Agent key", ErrInvalidEvent)
 	}
 	for _, raw := range []json.RawMessage{e.Input, e.Output} {
@@ -175,7 +183,7 @@ func readMetadata(callback func(*gin.Context) Metadata, ctx *gin.Context) (value
 		}
 	}()
 	value = callback(ctx)
-	if !validText(value.BusinessType, 64) || !validText(value.BusinessID, 191) || !validText(value.RequestID, 191) {
+	if !validText(value.BusinessType, 64) || !validText(value.BusinessID, 255) || !validText(value.RequestID, 255) {
 		return Metadata{}, fmt.Errorf("tracegorm: metadata contains invalid or oversized text")
 	}
 	return value, nil

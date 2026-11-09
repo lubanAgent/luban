@@ -6,7 +6,7 @@
 
 ## 接入
 
-1. 通过数据库变更流程执行 [MySQL 建表 SQL](../../sql/trace/001_create_tables.mysql.sql)，创建 `tblLubanTraceRun` 和 `tblLubanTraceSpan00`～`tblLubanTraceSpan19`，共 21 张表。
+1. 通过数据库变更流程执行 [MySQL 建表 SQL](../../sql/trace/001_create_tables.mysql.sql)，创建 `tblLubanTraceRun` 和 `tblLubanTraceSpan0`～`tblLubanTraceSpan19`，共 21 张表。
 2. 启动时创建 writer，并注入 Runtime：
 
 ```go
@@ -42,7 +42,7 @@ if err := writer.Close(shutdownCtx); err != nil {
 // 排空成功后才关闭 traceDB 和日志。
 ```
 
-New 会检查 Run 表及全部 20 张 Span 表的列、主键和索引；缺任何一张表都会返回 error。必须传基础连接，不能传事务、DryRun 或业务 Scope。内部使用独立 Session，宿主查询条件和请求取消不会带入后台写入。
+New 只校验参数和传入的 Gorm 句柄，不 Ping、不读取 schema，也不检查 Run 表或 20 张 Span 表；宿主必须提前完成建表。必须传基础连接，不能传事务或 DryRun。内部使用独立 Session，宿主查询条件和请求取消不会带入后台写入。缺表或字段不兼容会在实际异步写入时通过 OnError/Stats 暴露。
 
 Close 等待超时不会停止后台排空，也不会关闭数据库；可用新的 Context 再次等待。所有已接受事件中只要有最终失败，Close 就返回可被 `errors.Is(err, tracegorm.ErrPersistence)` 识别的错误。队列拒绝的事件单独通过 Stats/OnError 表示。
 
@@ -80,7 +80,7 @@ Metadata: func(ctx *gin.Context) tracegorm.Metadata {
 },
 ```
 
-没有这些字段也可按 runId 查。回调异常或元数据超长时，保留事件、清空元数据并报告错误。Service 最多 64 个字符，BusinessType 最多 64，BusinessID/RequestID 最多 191。
+没有这些字段也可按 runId 查。回调异常或元数据超长时，保留事件、清空元数据并报告错误。Service 最多 128 个字符，BusinessType 最多 64，BusinessID/RequestID 最多 255。
 
 | 参数 | 默认值 |
 | --- | --- |
@@ -99,8 +99,10 @@ Stats 区分 Received、Accepted、Rejected、Persisted、Failed、Pending、Pen
 ## 存储、故障和导出
 
 - span 表保存所有完整事件，包括最终 run 事件；run 表是完成运行的检索摘要。
-- 分表固定为 `CRC32 IEEE(完整 runId 原始字节) % 20`，包含 `run_` 前缀、区分大小写。`tracegorm.SpanTable(runID)` 返回 `tblLubanTraceSpan00`～`19`，同一次 Run 的所有事件在同一张表。跨进程、重试与查询使用同一路由。
-- 空模型输入的外层 Agent span 保存为 `status=skipped`、`skipReason=empty_input`；Run 仍按后续函数实际结果记录。此状态不增加模型、Tool 或 Skill 的虚假 span。`status` 列为 varchar(16)，现有 DDL 不需要变更。
+- 分表固定为 `CRC32 IEEE(完整 runId 原始字节) % 20`，包含 `run_` 前缀、区分大小写。`tracegorm.SpanTable(runID)` 返回 `tblLubanTraceSpan0`～`19`，同一次 Run 的所有事件在同一张表。跨进程、重试与查询使用同一路由。
+- 空模型输入的外层 Agent span 保存为 `status=skipped`、`skipReason=empty_input`；Run 仍按后续函数实际结果记录。此状态不增加模型、Tool 或 Skill 的虚假 span。`status` 列为 varchar(32)。
+- 公共字段与 record 表一致：自增 `id`、Unix 秒 `create_time/update_time`、默认 0 的 `deleted`。`run_id/span_id` 为 varchar(64)，`kind` 为 varchar(64)。每列和每张表都有中文 `COMMENT`；普通字段有明确 `DEFAULT`。自增 `id` 由数据库生成；`longtext` 类型的 `error_msg/event_json` 按规范必须可空且禁止默认值，SDK 每次写入事件时仍显式赋值。
+- `run_id` 是 Run 表唯一键，`(run_id, span_id)` 是 Span 表唯一键；它们继续负责异步重试幂等。
 - span 身份是 `(run_id, span_id)`；重复投递保留首次成功内容。一批数据按分表归组，在同一个事务保存所有分组及 Run 摘要；任一表写入失败则整批回滚。
 - 当前是完成事件：进程中断可能只有部分 span，没有最终 run 行。run 行存在也不能证明没有丢失其他 span。
 - 数据库故障、队列满和事件过大不改变业务 Run 的结果。进程强杀或持续故障可能丢数据；这是尽力持久化，不是可靠任务队列。

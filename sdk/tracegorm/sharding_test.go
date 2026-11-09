@@ -3,6 +3,7 @@ package tracegorm
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +14,9 @@ import (
 func TestSpanShardStableAndSameRunCoLocated(t *testing.T) {
 	// Independently calculated CRC32 IEEE fixtures freeze the on-disk routing.
 	for runID, want := range map[string]string{
-		"run_test":                             "tblLubanTraceSpan00",
+		"run_test":                             "tblLubanTraceSpan0",
 		"run_00000000000000000000000000000000": "tblLubanTraceSpan17",
-		"run_ffffffffffffffffffffffffffffffff": "tblLubanTraceSpan04",
+		"run_ffffffffffffffffffffffffffffffff": "tblLubanTraceSpan4",
 		"run_8b051387e4dbc0851bdf258a617eb9f6": "tblLubanTraceSpan11",
 	} {
 		if got := SpanTable(runID); got != want {
@@ -31,7 +32,11 @@ func TestSpanShardStableAndSameRunCoLocated(t *testing.T) {
 	for i := range 1000 {
 		runID := fmt.Sprintf("run_%032x", i)
 		name := SpanTable(runID)
-		if !strings.HasPrefix(name, "tblLubanTraceSpan") || len(name) != len("tblLubanTraceSpan00") {
+		const prefix = "tblLubanTraceSpan"
+		suffix := strings.TrimPrefix(name, prefix)
+		index, err := strconv.Atoi(suffix)
+		if !strings.HasPrefix(name, prefix) || err != nil ||
+			index < 0 || index >= spanShardCount || strconv.Itoa(index) != suffix {
 			t.Fatalf("invalid shard name %q", name)
 		}
 		if seen[name] {
@@ -63,18 +68,23 @@ func TestSpanShardStableAndSameRunCoLocated(t *testing.T) {
 	}
 }
 
-func TestSpanShardAtomicWriteAndSchemaCompleteness(t *testing.T) {
+func TestMissingUnusedShardDoesNotBlockNew(t *testing.T) {
 	db := testDB(t, true)
-	// Even an unused high-numbered shard must be checked at startup.
 	shard := "tblLubanTraceSpan19"
 	if err := db.Exec("DROP TABLE " + shard).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(context.Background(), db, Options{Service: "test"}); err == nil || !strings.Contains(err.Error(), shard) {
-		t.Fatalf("missing shard not detected: %v", err)
+	w, err := New(context.Background(), db, Options{Service: "test"})
+	if err != nil {
+		t.Fatalf("New inspected unused shard schema: %v", err)
 	}
+	if err := closeWriter(t, w); err != nil {
+		t.Fatal(err)
+	}
+}
 
-	db = testDB(t, true)
+func TestSpanShardAtomicWrite(t *testing.T) {
+	db := testDB(t, true)
 	w := testWriter(t, db, nil)
 	root := rootEvent()
 	w.WriteTrace(nil, root)

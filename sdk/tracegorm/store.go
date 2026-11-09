@@ -15,8 +15,7 @@ type store interface {
 }
 
 type gormStore struct {
-	db      *gorm.DB
-	dialect string
+	db *gorm.DB
 }
 
 func newGormStore(db *gorm.DB) (*gormStore, error) {
@@ -47,7 +46,7 @@ func newGormStore(db *gorm.DB) (*gormStore, error) {
 		NewDB: true, Initialized: true, Context: context.Background(), SkipHooks: true,
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
-	return &gormStore{db: session, dialect: dialect}, nil
+	return &gormStore{db: session}, nil
 }
 
 func nilValue(v any) bool {

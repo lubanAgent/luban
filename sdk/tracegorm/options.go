@@ -69,8 +69,8 @@ type Stats struct {
 }
 
 func (o Options) normalized() (Options, error) {
-	if strings.TrimSpace(o.Service) == "" || !validText(o.Service, 64) {
-		return o, fmt.Errorf("tracegorm: Service requires 1..64 Unicode characters")
+	if strings.TrimSpace(o.Service) == "" || !validText(o.Service, 128) {
+		return o, fmt.Errorf("tracegorm: Service requires 1..128 Unicode characters")
 	}
 	if o.QueueSize < 0 || o.BatchSize < 0 || o.MaxPendingBytes < 0 ||
 		o.MaxEventBytes < 0 || o.BatchBytes < 0 || o.FlushInterval < 0 || o.WriteTimeout < 0 {

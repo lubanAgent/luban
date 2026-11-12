@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Options supplies assets and optional company adapters. Injected resources
+// Options supplies assets and optional host adapters. Injected resources
 // remain owned by the caller; Close only closes resources created by New.
 type Options struct {
 	Assets          fs.FS

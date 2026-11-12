@@ -15,14 +15,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lubanAgent/luban/adapters"
 	"github.com/lubanAgent/luban/agents"
 	"github.com/lubanAgent/luban/server"
 )
 
 func TestHelpAndInvalidCommandsDoNotInitializeResources(t *testing.T) {
 	// No conf/ directory, no credentials, no database. These commands must
-	// finish before adapters.Configure, rather than failing resource startup.
+	// finish before loading configuration or creating runtime resources.
 	t.Chdir(t.TempDir())
 	for _, test := range []struct {
 		args []string
@@ -41,13 +40,13 @@ func TestHelpAndInvalidCommandsDoNotInitializeResources(t *testing.T) {
 }
 
 // Build and execute the real entry point from a fresh runtime directory. Only
-// the gateway is fake; Configure, file loading, imports and CLI are production.
+// the gateway is fake; file loading, imports and CLI are production.
 func TestRootBinaryRunsAllAgentsAndNewJSONAgentWithoutBusinessDB(t *testing.T) {
 	root := t.TempDir()
 	runtimeAssets(t, root)
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/gateway/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer smoke-key" {
-			t.Error("configured company model endpoint/key not used")
+			t.Error("configured model endpoint/key not used")
 		}
 		var body struct {
 			Model string `json:"model"`
@@ -62,11 +61,8 @@ func TestRootBinaryRunsAllAgentsAndNewJSONAgentWithoutBusinessDB(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"smoke reply"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`))
 	}))
 	defer gateway.Close()
-	t.Setenv("LUBAN_gateway_BASE_URL", gateway.URL+"/gateway/v1")
-	t.Setenv("LUBAN_gateway_KEY", "smoke-key")
-	for _, key := range []string{"LUBAN_DB_ADDR", "LUBAN_DB_NAME", "LUBAN_DB_USER", "LUBAN_DB_PASSWORD"} {
-		t.Setenv(key, "")
-	}
+	t.Setenv("LUBAN_LLM_BASE_URL", gateway.URL+"/gateway/v1")
+	t.Setenv("LUBAN_LLM_API_KEY", "smoke-key")
 	binary := filepath.Join(t.TempDir(), "luban")
 	build := exec.Command("go", "build", "-o", binary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
@@ -78,10 +74,6 @@ func TestRootBinaryRunsAllAgentsAndNewJSONAgentWithoutBusinessDB(t *testing.T) {
 		{"added", `{"userPrompt":"hello"}`, `"smoke reply"`},
 	} {
 		t.Run(test.key, func(t *testing.T) {
-			tracePath := filepath.Join(root, "log", "luban.log")
-			if err := os.Remove(tracePath); err != nil && !os.IsNotExist(err) {
-				t.Fatal(err)
-			}
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "run", test.key, "--input", test.input)
@@ -94,17 +86,10 @@ func TestRootBinaryRunsAllAgentsAndNewJSONAgentWithoutBusinessDB(t *testing.T) {
 			if strings.TrimSpace(stdout.String()) != test.want {
 				t.Fatalf("stdout=%s", stdout.String())
 			}
-			traces, err := os.ReadFile(tracePath)
-			if err != nil {
-				t.Fatalf("read company Trace log: %v", err)
-			}
-			for _, field := range []string{`"msg":"luban_trace"`, `"traceEvent":`, `"runId":`, `"time":`, `"file":`, `"module":"luban"`} {
-				if !bytes.Contains(traces, []byte(field)) {
-					t.Errorf("company Trace log missing %s", field)
+			for _, field := range []string{`"msg":"luban_trace"`, `"traceEvent":`, `"runId":`} {
+				if !bytes.Contains(stderr.Bytes(), []byte(field)) {
+					t.Errorf("Trace output missing %s", field)
 				}
-			}
-			if strings.Contains(stderr.String(), `"traceEvent":`) {
-				t.Fatal("CLI bypassed company logging and wrote Trace to stderr")
 			}
 		})
 	}
@@ -151,18 +136,10 @@ func runtimeAssets(t *testing.T, root string) {
   excludeAgents: [admissions]
 backgroundAgents: []
 llm:
-  admissions:
-    - baseUrl: ${LUBAN_gateway_BASE_URL}
-      apiKey: ${LUBAN_gateway_KEY}
+  default:
+    - baseUrl: ${LUBAN_LLM_BASE_URL}
+      apiKey: ${LUBAN_LLM_API_KEY}
 `,
-		"conf/mount/config.yaml": `log:
-  level: info
-  stdout: false
-  buffer:
-    switch: "false"
-`,
-		"conf/mount/resource.yaml": "mysql: {}\n",
-		"conf/mount/api.yaml":      "modelHTTP:\n  timeout: 10s\n",
 	} {
 		destination := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
@@ -182,8 +159,8 @@ func TestRootHTTPAssemblyLoadsAddedAgentAndUsesInjectedHostLifecycle(t *testing.
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"HTTP reply"}}]}`))
 	}))
 	defer gateway.Close()
-	t.Setenv("LUBAN_gateway_BASE_URL", gateway.URL+"/v1")
-	t.Setenv("LUBAN_gateway_KEY", "smoke-key")
+	t.Setenv("LUBAN_LLM_BASE_URL", gateway.URL+"/v1")
+	t.Setenv("LUBAN_LLM_API_KEY", "smoke-key")
 	t.Chdir(root)
 	var traces bytes.Buffer
 	options := server.Options{Assets: os.DirFS("."), TraceWriter: server.NewJSONTraceWriter(&traces),
@@ -231,15 +208,6 @@ func TestRootHTTPAssemblyLoadsAddedAgentAndUsesInjectedHostLifecycle(t *testing.
 			return nil
 		},
 	}
-	command, err := server.ParseCommand(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	closeHost, err := adapters.Configure(&options, command)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer closeHost()
 	app, err := server.New(options)
 	if err != nil {
 		t.Fatal(err)

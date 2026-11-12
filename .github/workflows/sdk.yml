@@ -1,13 +1,14 @@
-name: Luban company checks
+name: Luban checks
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
   test:
-    # Company adapters need a trusted runner with private module access.
-    # Do not run untrusted PRs on this runner.
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

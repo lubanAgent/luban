@@ -46,8 +46,8 @@ output, err := rt.Run(ctx, agentKey, input)
 | 完整事件快照 | `sdk/internal/trace/trace.go` | 保持 version=1 及现有字段 |
 | Run 最终事件 | `sdk/run.go` | 仍在 Run 返回前发出，整次 Run 的事件最后到达 |
 | 模型、Tool、Skill 事件 | `sdk/internal/eino/` | 保持事件归属与 Token 表达 |
-| 公司模型传输参考 | `adapters/model_http.go` | 仅作宿主适配参考；新存储包不导入它 |
-| 日志 Writer | `adapters/dependencies.go`、`server/log.go` | 仍可单独使用，不自动启用数据库 |
+| 公司模型传输参考 | `integrations/example/adapters/model_http.go` | 仅作宿主适配参考；根 module 与新存储包都不导入它 |
+| 日志 Writer | `integrations/example/adapters/dependencies.go`、`server/log.go` | 通用日志包可单独使用；公司版不自动启用数据库 |
 | 离线解析器 | `sdk/trace-viewer/trace-data.js` | 原事件 JSON 导出后应继续兼容 |
 
 本期不为 record 改 Go/Gin Context 体系，不改变配置 key，也不要求业务采用 `agents/` 自动发现。SDK 子包仍位于唯一根 Go module 内。
@@ -465,7 +465,7 @@ T1～T4 不依赖 record 业务方案。T5 的正式接入、目标库和容器�
 | C18 | 没有最终 Run 事件 | 保留已有 span，不生成 success 摘要，不声称已完整完成 |
 | C19 | UTF-8、大 Prompt/Skill、边界长度 | 精确保存预算内数据；超长索引字段明确拒绝或按元数据规则处理，不依赖 DB 截断 |
 | C20 | 数据库导出 | NDJSON 可由 `parseLogs` 读取，与保存前事件语义一致 |
-| C21 | 只导入 sdk 和 tracegorm 的宿主 | 使用 record 的 Gin/Gorm/Eino 组合编译；包依赖图不包含根 server/adapters/agents |
+| C21 | 只导入 sdk 和 tracegorm 的宿主 | 使用 record 的 Gin/Gorm/Eino 组合编译；包依赖图不包含根 server、agents 或公司 integration module |
 | C22 | 表结构 | MySQL DDL 与私有行类型字段、长度、索引由离线测试保持一致；New 不检查数据库 schema |
 | C23 | 默认值、Metadata、统计 | 默认值生效；零/负数/关系非法分别按约定处理；静止时统计等式成立，重复键不以 RowsAffected 计算 Persisted |
 
@@ -506,7 +506,7 @@ Luban 交付本 Spec 的公共 API、DDL、示例及 C01～C23 测试；record �
 | 本 Spec 的结构/API 一致性自查 | 已执行；检查记录在本文末尾 |
 | tracegorm、DDL 文件、入库示例与验收测试 | 已实现；专项测试与 make check（普通/race/vet/build）通过 |
 | 完整 SDK→SQLite→原始 JSON→查看页 | 已通过，覆盖 Tool/Skill/OutputTool、Batch、父子与错误 |
-| 独立消费者 | Go 1.25.0、本地 replace 构建通过，无公司/server/adapters/agents 包导入 |
+| 独立消费者 | Go 1.25.0、本地 replace 构建通过，无公司 integration、server 或 agents 包导入 |
 | trace_store 与远端版本安装 | 待环境验证；已知代理/checksum 访问阻塞仍需解决 |
 
 本轮自查重点：

@@ -3,6 +3,6 @@ http:
   routePrefix: /luban/ai/agent
 
 llm:
-  admissions:
-    - baseUrl: https://gateway.example.com/gateway/rp/v1/chat/completions
+  default:
+    - baseUrl: ${LUBAN_LLM_BASE_URL}
       apiKey: ${LUBAN_LLM_API_KEY}

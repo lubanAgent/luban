@@ -334,8 +334,8 @@ func TestRegistrationSurvivesTrimpathBuild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// This fixture imports no company adapters. Registration is checked without
-	// initializing real company databases, proxy clients or logging resources.
+	// This fixture imports no host adapters. Registration is checked without
+	// initializing real databases, proxy clients or logging resources.
 	command = exec.Command(binary, assets, "unknown")
 	command.Dir = ".."
 	output, err := command.CombinedOutput()

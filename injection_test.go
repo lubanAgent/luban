@@ -23,8 +23,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// Injection tests own their connection config. They must not load company
-// credentials or depend on the service's company credentials.
+// Injection tests own their connection config and must not load deployment
+// credentials.
 func injectionAssets(t *testing.T) fs.FS {
 	t.Helper()
 	files := fstest.MapFS{
@@ -64,9 +64,9 @@ type injectedModel struct{ calls int }
 
 type failingModel struct{}
 
-func (*failingModel) Name() string { return "company-gateway" }
+func (*failingModel) Name() string { return "host-gateway" }
 func (*failingModel) Invoke(*gin.Context, luban.ModelRequest) (luban.ModelResponse, error) {
-	return luban.ModelResponse{}, errors.New("company gateway failed")
+	return luban.ModelResponse{}, errors.New("host gateway failed")
 }
 
 type loggerRecorder struct{ errors int }
@@ -78,13 +78,13 @@ func (logger *loggerRecorder) Errorf(*gin.Context, string, ...any) {
 	logger.errors++
 }
 
-func (*injectedModel) Name() string { return "company-gateway" }
+func (*injectedModel) Name() string { return "host-gateway" }
 func (model *injectedModel) Invoke(_ *gin.Context, request luban.ModelRequest) (luban.ModelResponse, error) {
 	model.calls++
 	if request.ModelName != "deepseek-chat" {
 		return luban.ModelResponse{}, io.ErrUnexpectedEOF
 	}
-	return luban.ModelResponse{Content: []luban.ModelPart{{Type: luban.PartText, Text: "company gateway response"}}}, nil
+	return luban.ModelResponse{Content: []luban.ModelPart{{Type: luban.PartText, Text: "host gateway response"}}}, nil
 }
 
 func (client *modelHTTP) Do(request *http.Request) (*http.Response, error) {
@@ -114,7 +114,7 @@ func (client *modelHTTP) Do(request *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func TestCompanyModelInvokerOverridesLubanHTTPForItsProject(t *testing.T) {
+func TestHostModelInvokerOverridesLubanHTTPForItsProject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LUBAN_API_KEY", "test-key")
 	invoker := &injectedModel{}
@@ -144,15 +144,15 @@ func TestCompanyModelInvokerOverridesLubanHTTPForItsProject(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/luban/ai/agent/summary", strings.NewReader(`{"userPrompt":"hello"}`))
 	request.Header.Set("Content-Type", "application/json")
 	engine.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "company gateway response") {
-		t.Fatalf("company model response %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "host gateway response") {
+		t.Fatalf("host model response %d: %s", response.Code, response.Body.String())
 	}
 	if invoker.calls != 1 || httpClient.requests != 0 {
 		t.Fatalf("custom calls=%d built-in HTTP calls=%d", invoker.calls, httpClient.requests)
 	}
 }
 
-func TestCompanyLoggerAndRendererAreUsed(t *testing.T) {
+func TestHostLoggerAndRendererAreUsed(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LUBAN_API_KEY", "test-key")
 	logger := &loggerRecorder{}
@@ -167,7 +167,7 @@ func TestCompanyLoggerAndRendererAreUsed(t *testing.T) {
 			if err == nil {
 				t.Error("Renderer received nil error")
 			}
-			ctx.JSON(http.StatusBadGateway, gin.H{"companyError": true})
+			ctx.JSON(http.StatusBadGateway, gin.H{"hostError": true})
 		},
 		Stdout: io.Discard,
 		Stderr: io.Discard,
@@ -272,7 +272,7 @@ func TestGenericDependenciesAreInjectedAndOwnedByHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := sqlDB.Ping(); err != nil {
-		t.Fatalf("injected company database was closed by Luban: %v", err)
+		t.Fatalf("injected database was closed by Luban: %v", err)
 	}
 	_ = sqlDB.Close()
 }

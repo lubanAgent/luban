@@ -51,7 +51,7 @@
 | `node --test sdk/trace-viewer/trace-data.test.js` | 原查看页 13 项测试全部通过 |
 | 离线示例 | 通过；6 条事件全部 Persisted，Rejected/Failed/Pending 为 0 |
 | 示例导出交原解析器 | 通过；1 次 Run、6 条事件、无缺失父节点 |
-| 独立 SDK 消费者 | 临时独立 module，Go 1.25.0、本地 replace，构建通过；未配置公司 replace，包依赖不含公司/server/adapters/agents |
+| 独立 SDK 消费者 | 临时独立 module，Go 1.25.0、本地 replace，构建通过；未配置公司 replace，包依赖不含公司 integration、server 或 agents |
 | MySQL SQL | 当前 MySQL dialector 的 DryRun SQL 检查通过；启动不再读取元数据，不代表真实 MySQL 验收 |
 
 测试日志本机保存于 `/tmp/luban-tracegorm-make-check.log`、`/tmp/luban-tracegorm-consumer.log`、`/tmp/luban-tracegorm-example.log`、`/tmp/luban-tracegorm-viewer.log`；导出样例在 `/tmp/luban-tracegorm-example.ndjson`。它们是可重跑的临时证据，不属于发布依赖。

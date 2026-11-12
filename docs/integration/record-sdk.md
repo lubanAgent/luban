@@ -139,7 +139,7 @@ record 的现有 `CallLLM` 会重组消息、固定温度，且不承接完整 t
 - 沿用对应客户端的 Domain 和 URLPath，保留完整 `/gateway/rp/v1/chat/completions`，不能只传域名。
 - 从实际配置映射请求/连接/响应头超时、路径超时、重试、重试状态码、连接池及代理设置；SDK 不额外叠加传输重试。
 - toolkit 会重新创建请求 Context，适配需要保留原取消链；响应体读完并关闭后才释放超时 Context。
-- 可参考 [公司 HTTP 传输实现](../../adapters/model_http.go)，在 record 本地适配，不能直接导入整个 Luban adapters 包。
+- 可参考 [公司 HTTP 传输实现](../../integrations/example/adapters/model_http.go)，在 record 本地适配，不能直接导入整个公司 integration module。
 
 同一网关可处理多个模型名。若不同业务使用不同凭据，分别创建调用器，按 projectKey 注入 `ProjectDefaults`，不要在适配代码中逐个硬编码模型名。
 

@@ -1,12 +1,12 @@
 # Security
 
-Do not commit API keys, gateway credentials, database passwords, proxy secrets, or private tokens.
+Do not commit API keys, gateway credentials, database passwords, or private tokens.
 
 Committed YAML must reference deployment secrets through environment placeholders:
 
 ```yaml
 apiKey: ${LUBAN_LLM_API_KEY}
-app_secret: ${IPS_APP_SECRET}
+serviceToken: ${SERVICE_TOKEN}
 ```
 
 `make check` runs `secrets_test.go`, which rejects literal values in common secret fields under `conf/`.

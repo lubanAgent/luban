@@ -46,8 +46,8 @@ output, err := rt.Run(ctx, agentKey, input)
 | 完整事件快照 | `sdk/internal/trace/trace.go` | 保持 version=1 及现有字段 |
 | Run 最终事件 | `sdk/run.go` | 仍在 Run 返回前发出，整次 Run 的事件最后到达 |
 | 模型、Tool、Skill 事件 | `sdk/internal/eino/` | 保持事件归属与 Token 表达 |
-| 公司模型传输参考 | `integrations/example/adapters/model_http.go` | 仅作宿主适配参考；根 module 与新存储包都不导入它 |
-| 日志 Writer | `integrations/example/adapters/dependencies.go`、`server/log.go` | 通用日志包可单独使用；公司版不自动启用数据库 |
+| 模型传输参考 | SDK 的 `HTTPDoer` / `ModelInvoker` 接口 | 由宿主在业务侧实现；根 module 与新存储包不绑定具体传输 |
+| 日志 Writer | `server/log.go` | 通用日志包可单独使用，不自动启用数据库 |
 | 离线解析器 | `sdk/trace-viewer/trace-data.js` | 原事件 JSON 导出后应继续兼容 |
 
 本期不为 record 改 Go/Gin Context 体系，不改变配置 key，也不要求业务采用 `agents/` 自动发现。SDK 子包仍位于唯一根 Go module 内。

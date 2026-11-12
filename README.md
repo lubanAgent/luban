@@ -2,7 +2,7 @@
 
 一份 Agent 配置描述执行流程，框架负责模型调用、Tool/Skill、节点传值、HTTP/MQ/Cron 入口和 Trace。一个服务、一份 `main.go`，运行多个 Agent。
 
-主 module `github.com/lubanAgent/luban` 只依赖标准库和公开开源包，不包含公司私有基础库。公司特有的 logkit、toolkit、公司 Gin、proxy 和 OceanBase 适配位于独立嵌套 module [integrations/example](integrations/example/README.md)，不会传递给 SDK 使用方。
+主 module `github.com/lubanAgent/luban` 只依赖标准库和公开开源包。
 
 ## 三步运行第一个 Agent
 
@@ -46,24 +46,11 @@ server/                 通用服务和默认实现
 models/                 业务数据库模型
 router/                 通用业务路由
 conf/luban.yaml         公开服务、模型连接和服务配置
-integrations/example/      公司适配独立 Go module，不进入根 module
 ```
 
 根模块启动时不创建数据库、不建表、不 Ping 模型网关。数据库、模型 HTTP、日志、Renderer、TraceWriter 和服务监听都可以由宿主注入。
 
-## 公司适配版
-
-公司版使用独立 module，构建后才能运行：
-
-```sh
-cd integrations/example
-go test ./...
-go build -o ../../luban-example .
-cd ../..
-./luban-example
-```
-
-公司基础设施变量和其他密钥必须通过部署环境注入。`conf/luban.yaml`、`conf/mount/*.yaml` 中只允许 `${ENV_NAME}` 引用，不允许提交字面凭据。
+模型连接和其他密钥必须通过部署环境注入。`conf/luban.yaml` 中只允许 `${ENV_NAME}` 引用，不允许提交字面凭据。
 
 `make check` 会扫描常见密钥字段。若不慎提交凭据，请立即按 [SECURITY.md](SECURITY.md) 轮换并处理历史记录。
 
@@ -74,10 +61,6 @@ make check
 docker build -t luban .
 ```
 
-`make check` 覆盖格式、根 module tidy、普通测试、race、vet 和 build。公司 module 需要公司网络与私有库权限，使用：
-
-```sh
-make check-example
-```
+`make check` 覆盖格式、module tidy、普通测试、race、vet 和 build。
 
 离线 Trace 查看页位于 [sdk/trace-viewer/index.html](sdk/trace-viewer/index.html)，可用 `go run ./sdk/examples/trace-gorm` 生成假数据和临时 SQLite 数据。

@@ -1,6 +1,5 @@
 .git
 docs
-integrations
 **/*_test.go
 **/testdata
 *.log

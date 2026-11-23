@@ -35,7 +35,7 @@ func TestConfiguredModelListWinsOverInjectedProjectDefault(t *testing.T) {
     - baseUrl: https://default.invalid/v1
       apiKey: ${UNUSED_ROUTE_KEY}
     - modelList: [special]
-      baseUrl: https://special.invalid/custom/v1
+      baseUrl: https://special.invalid/custom/v1/chat/completions
       apiKey: special-key
     - modelList: [override]
       baseUrl: https://overridden.invalid/v1

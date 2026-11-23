@@ -111,8 +111,8 @@ func TestProjectModelRoutingIsolatesConcurrentCredentials(t *testing.T) {
 	}))
 	defer gateway.Close()
 	projects := map[string][]ModelConnection{
-		"school":  {{BaseURL: gateway.URL + "/school", APIKey: "school-key"}, {ModelList: []string{"special"}, BaseURL: gateway.URL + "/special", APIKey: "special-key"}},
-		"trustee": {{BaseURL: gateway.URL + "/trustee", APIKey: "trustee-key"}},
+		"school":  {{BaseURL: gateway.URL + "/school/chat/completions", APIKey: "school-key"}, {ModelList: []string{"special"}, BaseURL: gateway.URL + "/special/chat/completions", APIKey: "special-key"}},
+		"trustee": {{BaseURL: gateway.URL + "/trustee/chat/completions", APIKey: "trustee-key"}},
 	}
 	rt, err := New(Options{Projects: projects})
 	if err != nil {
@@ -206,6 +206,9 @@ func TestAnthropicRoundTripPreservesToolsSystemAndUsage(t *testing.T) {
 
 func TestOpenAIWirePreservesMediaAndParallelToolCalls(t *testing.T) {
 	doer := doerFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("request path = %q", r.URL.Path)
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
@@ -223,7 +226,7 @@ func TestOpenAIWirePreservesMediaAndParallelToolCalls(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"one","type":"function","function":{"name":"query","arguments":"{}"}},{"id":"two","type":"function","function":{"name":"query","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`))}, nil
 	})
-	rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1", APIKey: "secret"}}}, HTTPDoer: doer})
+	rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1/chat/completions", APIKey: "secret"}}}, HTTPDoer: doer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +260,7 @@ func TestOpenAIWireToolChoice(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))}, nil
 			})
-			rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1", APIKey: "secret"}}}, HTTPDoer: doer})
+			rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1/chat/completions", APIKey: "secret"}}}, HTTPDoer: doer})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -288,7 +291,7 @@ func TestOpenAIRequiredRejectedDoesNotRetryAsAuto(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(`{"error":"unsupported"}`))}, nil
 	})
-	rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1", APIKey: "secret"}}}, HTTPDoer: doer})
+	rt, err := New(Options{Projects: map[string][]ModelConnection{"project": {{BaseURL: "https://example.test/v1/chat/completions", APIKey: "secret"}}}, HTTPDoer: doer})
 	if err != nil {
 		t.Fatal(err)
 	}

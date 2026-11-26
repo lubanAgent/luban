@@ -76,8 +76,8 @@ func (m *protocolModel) post(ctx *gin.Context, endpoint string, payload any, res
 }
 
 func modelEndpoint(baseURL, protocol string) string {
-	base := strings.TrimRight(baseURL, "/")
 	if protocol == "anthropic" {
+		base := strings.TrimRight(baseURL, "/")
 		if strings.HasSuffix(base, "/messages") {
 			return base
 		}
@@ -86,8 +86,5 @@ func modelEndpoint(baseURL, protocol string) string {
 		}
 		return base + "/v1/messages"
 	}
-	if strings.HasSuffix(base, "/chat/completions") {
-		return base
-	}
-	return base + "/chat/completions"
+	return baseURL
 }

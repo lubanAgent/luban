@@ -61,7 +61,7 @@ func TestRootBinaryRunsAllAgentsAndNewJSONAgentWithoutBusinessDB(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"smoke reply"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`))
 	}))
 	defer gateway.Close()
-	t.Setenv("LUBAN_LLM_BASE_URL", gateway.URL+"/gateway/v1")
+	t.Setenv("LUBAN_LLM_BASE_URL", gateway.URL+"/gateway/v1/chat/completions")
 	t.Setenv("LUBAN_LLM_API_KEY", "smoke-key")
 	binary := filepath.Join(t.TempDir(), "luban")
 	build := exec.Command("go", "build", "-o", binary, ".")
